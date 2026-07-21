@@ -23,9 +23,9 @@ try:
 except ImportError:
     HAS_PYVIS = False
 
-# ==============================================================================
+
 # CẤU HÌNH TỰ ĐỘNG KÍCH HOẠT HẠ TẦNG STREAMLIT
-# ==============================================================================
+
 if __name__ == '__main__':
     current_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(current_dir)
@@ -36,14 +36,14 @@ if __name__ == '__main__':
         subprocess.run([sys.executable, "-m", "streamlit", "run", __file__])
         sys.exit()
 
-# ==============================================================================
+
 # QUẢN LÝ PHẦN CỨNG VẬT LÝ (HARDWARE ACCELERATION ORCHESTRATOR)
-# ==============================================================================
+
 device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
-# ==============================================================================
+
 # GIAO DIỆN CINEMATIC PREMIUM & HIỆU ỨNG CARD GLASSMORPHISM
-# ==============================================================================
+
 st.set_page_config(page_title="Netflix Enterprise v6.1 AI Master", page_icon="🍿", layout="wide")
 
 st.markdown("""
@@ -73,9 +73,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ==============================================================================
+
 # ĐỊNH NGHĨA KIẾN TRÚC MẠNG NEURAL NCF SÂU
-# ==============================================================================
+
 class NeuralCollaborativeFiltering(nn.Module):
     def __init__(self, num_users=85307, num_movies=10524, embedding_dim=32):
         super(NeuralCollaborativeFiltering, self).__init__()
@@ -142,7 +142,7 @@ def load_resources():
 model, movies_df, tfidf_matrix, tfidf_vectorizer = load_resources()
 all_genres = sorted(list(set([g for g_list in movies_df['genres'].str.split('|') for g in g_list])))
 
-# --- DASHBOARD CONTROL PANEL ---
+# DASHBOARD CONTROL PANEL
 st.title("🎬 NETFLIX ENTERPRISE SYSTEMS - V6.1 AI MASTER")
 st.caption("Kiến trúc công nghiệp: Dual-Semantic NLP | Neural NCF | Knowledge Graph")
 
@@ -157,7 +157,7 @@ st.markdown("---")
 if "user_ratings" not in st.session_state:
     st.session_state.user_ratings = {}
 
-# --- BỘ ĐIỀU PHỐI TẠI THANH SIDEBAR ---
+# BỘ ĐIỀU PHỐI TẠI THANH SIDEBAR
 with st.sidebar:
     st.header("⚙️ CHẾ ĐỘ ENGINE GỢI Ý")
     app_mode = st.sidebar.radio(
@@ -174,9 +174,9 @@ with st.sidebar:
     st.markdown("---")
     top_k = st.slider("🍿 Số lượng phim hiển thị (Top K):", min_value=5, max_value=20, value=10)
 
-# ==============================================================================
-# PHÂN HỆ THAY THẾ MỚI: PHA CHẾ ĐIỆN ẢNH AI (CINEMATIC ALCHEMIST ENGINE)
-# ==============================================================================
+
+# PHA CHẾ ĐIỆN ẢNH AI (CINEMATIC ALCHEMIST ENGINE)(GỌP 2 PHIM)
+
 if app_mode == "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)":
     st.header("🧪 Cinematic Alchemist Engine (Thuật Toán Pha Chế Điện Ảnh)")
     st.markdown(
@@ -308,9 +308,9 @@ if app_mode == "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)":
                             <span style="font-size:12px; color:#E50914; font-weight:bold;">🧪 ĐỘ HÒA HỢP: {match_percent:.1f}%</span>
                         """, unsafe_allow_html=True)
 
-# ==============================================================================
-# PHÂN HỆ: CÁ NHÂN HÓA AI (NCF)
-# ==============================================================================
+
+# CÁ NHÂN HÓA AI (NCF)
+
 elif app_mode == "👤 Cá nhân hóa AI (NCF)":
     st.header("🎯 Gợi ý cá nhân hóa Deep Learning (Bayesian NCF)")
     st.markdown(
@@ -414,9 +414,7 @@ elif app_mode == "👤 Cá nhân hóa AI (NCF)":
                                 <div style="margin-top:4px;"><span class="badge-xai">🧬 Hợp gu: {alignment_percent:.1f}%</span></div>
                             """, unsafe_allow_html=True)
 
-# ==============================================================================
-# PHÂN HỆ: TÌM KIẾM SEMANTIC LAI (NLP)
-# ==============================================================================
+# TÌM KIẾM SEMANTIC LAI (NLP)
 elif app_mode == "🔍 Tìm Phim Qua Từ Khóa/Tên (NLP)":
     st.header("🔍 Dense-Sparse Hybrid Semantic Search Engine")
     st.markdown(
@@ -458,9 +456,7 @@ elif app_mode == "🔍 Tìm Phim Qua Từ Khóa/Tên (NLP)":
                     <span style="font-size:12px; color:#00d2d3; font-weight:bold;">🧬 TƯƠNG ĐỒNG LAI: {hybrid_sim[idx] * 100:.1f}%</span>
                 """, unsafe_allow_html=True)
 
-# ==============================================================================
-# PHÂN HỆ: ĐỒ THỊ TRI THỨC TƯƠNG TÁC (KNOWLEDGE GRAPH)
-# ==============================================================================
+# ĐỒ THỊ TRI THỨC TƯƠNG TÁC (KNOWLEDGE GRAPH)
 elif app_mode == "🌌 Đồ thị Tri thức (Knowledge Graph)":
     st.header("🌌 Neural Knowledge Graph - Vũ trụ Điện ảnh 2D/3D")
     st.markdown(
@@ -517,9 +513,9 @@ elif app_mode == "🌌 Đồ thị Tri thức (Knowledge Graph)":
 
                 components.html(html_data, height=620)
 
-# ==============================================================================
-# PHÂN HỆ: TÌM KIẾM THEO THỂ LOẠI
-# ==============================================================================
+
+#TÌM KIẾM THEO THỂ LOẠI
+
 elif app_mode == "🏷️ Tìm Phim Theo Thể Loại":
     st.header("🏷️ Genre Query Engine - Tìm kiếm phim theo tổ hợp danh mục")
     target_genres = st.multiselect("Nhấp chọn các thể loại phim muốn tìm kiếm:", all_genres, default=[all_genres[0]])
