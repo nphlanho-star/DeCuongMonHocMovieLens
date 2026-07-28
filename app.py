@@ -14,18 +14,24 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.decomposition import PCA
 
+# Hỗ trợ mô hình AI Ngữ nghĩa (Sentence Transformers)
+try:
+    from sentence_transformers import SentenceTransformer
+    HAS_SBERT = True
+except ImportError:
+    HAS_SBERT = False
+
 # Hỗ trợ render Đồ thị tri thức tương tác
 try:
     from pyvis.network import Network
     import streamlit.components.v1 as components
-
     HAS_PYVIS = True
 except ImportError:
     HAS_PYVIS = False
 
-
+# ==============================================================================
 # CẤU HÌNH TỰ ĐỘNG KÍCH HOẠT HẠ TẦNG STREAMLIT
-
+# ==============================================================================
 if __name__ == '__main__':
     current_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(current_dir)
@@ -36,15 +42,15 @@ if __name__ == '__main__':
         subprocess.run([sys.executable, "-m", "streamlit", "run", __file__])
         sys.exit()
 
-
-# QUẢN LÝ PHẦN CỨNG VẬT LÝ (HARDWARE ACCELERATION ORCHESTRATOR)
-
+# ==============================================================================
+# QUẢN LÝ PHẦN CỨNG VẬT LÝ
+# ==============================================================================
 device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
-
-# GIAO DIỆN CINEMATIC PREMIUM & HIỆU ỨNG CARD GLASSMORPHISM
-
-st.set_page_config(page_title="Netflix Enterprise v6.1 AI Master", page_icon="🍿", layout="wide")
+# ==============================================================================
+# GIAO DIỆN CINEMATIC PREMIUM
+# ==============================================================================
+st.set_page_config(page_title="Netflix Enterprise v6.5 AI Master", page_icon="🍿", layout="wide")
 
 st.markdown("""
     <style>
@@ -69,13 +75,14 @@ st.markdown("""
     .badge-warning { background-color: rgba(255, 159, 67, 0.15); color: #ff9f43; }
     .badge-xai { background-color: rgba(0, 210, 211, 0.15); color: #00d2d3; font-size: 10px; padding: 2px 5px; border-radius: 3px; }
     .stChatMessage { background-color: transparent !important; border: 1px solid #1f1f2e; border-radius: 10px; }
+    .overview-text { font-size: 11px; color: #aaaaaa; height: 48px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; margin-top: 5px; }
     </style>
 """, unsafe_allow_html=True)
 
 
-
-# ĐỊNH NGHĨA KIẾN TRÚC MẠNG NEURAL NCF SÂU
-
+# ==============================================================================
+# KIẾN TRÚC MẠNG NEURAL NCF
+# ==============================================================================
 class NeuralCollaborativeFiltering(nn.Module):
     def __init__(self, num_users=85307, num_movies=10524, embedding_dim=32):
         super(NeuralCollaborativeFiltering, self).__init__()
@@ -102,9 +109,19 @@ def predict_with_custom_user_embed(model, custom_user_embed, movie_indices_tenso
     return model.fc_layers(x).squeeze()
 
 
-def get_movie_poster(movie_title):
+# ==============================================================================
+# HÀM LẤY ẢNH POSTER VỚI BẢO VỆ DỰ PHÒNG & CACHE
+# ==============================================================================
+@st.cache_data(show_spinner=False, ttl=3600)
+def get_movie_poster(movie_title, poster_url_from_df=None):
+    fallback_image = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=500&auto=format&fit=crop"
+
+    if poster_url_from_df and isinstance(poster_url_from_df, str) and poster_url_from_df.startswith(
+            "http") and poster_url_from_df != fallback_image:
+        return poster_url_from_df
+
     api_key = "8265bd1679663a7ea12ac168da84d2e8"
-    clean_title = movie_title.split(' (')[0].strip()
+    clean_title = re.sub(r'\s*\(\d{4}\)', '', str(movie_title)).strip()
     if ", The" in clean_title:
         clean_title = "The " + clean_title.replace(", The", "").strip()
     elif ", A" in clean_title:
@@ -112,44 +129,74 @@ def get_movie_poster(movie_title):
     elif ", An" in clean_title:
         clean_title = "An " + clean_title.replace(", An", "").strip()
 
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     url = f"https://api.themoviedb.org/3/search/movie?api_key={api_key}&query={requests.utils.quote(clean_title)}"
+
     try:
-        response = requests.get(url, timeout=1.5).json()
-        if response and 'results' in response and len(response['results']) > 0:
-            poster_path = response['results'][0]['poster_path']
-            if poster_path: return f"https://image.tmdb.org/t/p/w500{poster_path}"
-    except:
+        response = requests.get(url, headers=headers, timeout=2.0)
+        if response.status_code == 200:
+            data = response.json()
+            if data and 'results' in data and len(data['results']) > 0:
+                poster_path = data['results'][0].get('poster_path')
+                if poster_path:
+                    return f"https://image.tmdb.org/t/p/w500{poster_path}"
+    except Exception:
         pass
-    return "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=500&auto=format&fit=crop"
+
+    return fallback_image
 
 
+# ==============================================================================
+# QUẢN LÝ TÀI NGUYÊN & ENGINE NHÚNG AI
+# ==============================================================================
 @st.cache_resource
 def load_resources():
+    # 1. Load Model NCF
     model = NeuralCollaborativeFiltering()
-    model.load_state_dict(torch.load('ncf_movie_recommender.pth', map_location=torch.device('cpu')))
+    if os.path.exists('ncf_movie_recommender.pth'):
+        model.load_state_dict(torch.load('ncf_movie_recommender.pth', map_location=torch.device('cpu')))
     model = model.to(device)
-    movies_df = pd.read_csv('movies_mapped.csv')
 
-    tfidf = TfidfVectorizer(stop_words='english')
-    enhanced_corpus = movies_df['genres'].str.replace('|', ' ') + ' ' + movies_df['genres'].str.replace('|',
-                                                                                                        ' ') + ' ' + \
-                      movies_df['title']
+    # 2. Đọc file dữ liệu (Tự động ưu tiên đọc file enriched đã tải đầy đủ)
+    csv_path = 'movies_enriched.csv' if os.path.exists('movies_enriched.csv') else 'movies_mapped.csv'
+    movies_df = pd.read_csv(csv_path)
+
+    if 'overview' not in movies_df.columns: movies_df['overview'] = "No overview available."
+    if 'poster_url' not in movies_df.columns: movies_df['poster_url'] = ""
+
+    # 3. Khởi tạo TF-IDF
+    tfidf = TfidfVectorizer(stop_words='english', ngram_range=(1, 2))
+    enhanced_corpus = (
+            movies_df['genres'].str.replace('|', ' ', regex=False) + ' ' +
+            movies_df['title'] + ' ' +
+            movies_df['overview'].fillna('')
+    )
     tfidf_matrix = tfidf.fit_transform(enhanced_corpus)
 
-    return model, movies_df, tfidf_matrix, tfidf
+    # 4. Khởi tạo mô hình Semantic Transformers (SBERT)
+    sbert_model = None
+    overview_embeddings = None
+    if HAS_SBERT:
+        sbert_model = SentenceTransformer('all-MiniLM-L6-v2')
+        corpus_texts = (movies_df['title'] + ". " + movies_df['overview'].fillna('')).tolist()
+        overview_embeddings = sbert_model.encode(corpus_texts, show_progress_bar=False, convert_to_numpy=True)
+
+    return model, movies_df, tfidf_matrix, tfidf, sbert_model, overview_embeddings
 
 
-model, movies_df, tfidf_matrix, tfidf_vectorizer = load_resources()
-all_genres = sorted(list(set([g for g_list in movies_df['genres'].str.split('|') for g in g_list])))
+model, movies_df, tfidf_matrix, tfidf_vectorizer, sbert_model, overview_embeddings = load_resources()
+all_genres = sorted(list(set([g for g_list in movies_df['genres'].dropna().str.split('|') for g in g_list])))
 
+# ==============================================================================
 # DASHBOARD CONTROL PANEL
-st.title("🎬 NETFLIX ENTERPRISE SYSTEMS - V6.1 AI MASTER")
-st.caption("Kiến trúc công nghiệp: Dual-Semantic NLP | Neural NCF | Knowledge Graph")
+# ==============================================================================
+st.title("🎬 NETFLIX ENTERPRISE SYSTEMS - V6.5 AI MASTER")
+st.caption("Kiến trúc công nghiệp: Hybrid Sentence-BERT + TF-IDF Keyword Boosting | Neural NCF | Knowledge Graph")
 
 m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-with m_col1: st.metric(label="🖥️ Thiết bị tính toán tối ưu", value=str(device).upper())
-with m_col2: st.metric(label="📊 Chiều sâu Vector Khai triển", value="32-Dimensions")
-with m_col3: st.metric(label="🧠 Động cơ Mạng Neural", value="NCF Multi-Layer")
+with m_col1: st.metric(label="🖥️ Thiết bị tính toán", value=str(device).upper())
+with m_col2: st.metric(label="📊 Chiều Vector NCF", value="32-Dimensions")
+with m_col3: st.metric(label="🧠 Động cơ Semantic", value="Hybrid SBERT Active" if HAS_SBERT else "TF-IDF Mode")
 with m_col4: st.metric(label="🔬 Đồ thị không gian", value="PyVis Enabled" if HAS_PYVIS else "Disabled")
 
 st.markdown("---")
@@ -157,12 +204,15 @@ st.markdown("---")
 if "user_ratings" not in st.session_state:
     st.session_state.user_ratings = {}
 
+# ==============================================================================
 # BỘ ĐIỀU PHỐI TẠI THANH SIDEBAR
+# ==============================================================================
 with st.sidebar:
     st.header("⚙️ CHẾ ĐỘ ENGINE GỢI Ý")
     app_mode = st.sidebar.radio(
         "Lựa chọn phân hệ chức năng:",
         [
+            "🤖 Tìm Phim Qua Mô Tả Cốt Truyện (Semantic AI)",
             "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)",
             "👤 Cá nhân hóa AI (NCF)",
             "🔍 Tìm Phim Qua Từ Khóa/Tên (NLP)",
@@ -174,19 +224,104 @@ with st.sidebar:
     st.markdown("---")
     top_k = st.slider("🍿 Số lượng phim hiển thị (Top K):", min_value=5, max_value=20, value=10)
 
+    # Hiển thị trạng thái dữ liệu
+    st.markdown("---")
+    st.subheader("📂 DỮ LIỆU SỬ DỤNG")
+    if os.path.exists('movies_enriched.csv'):
+        st.success("✅ Đang dùng `movies_enriched.csv` (Đã có Cốt truyện & Poster)")
+    else:
+        st.warning(
+            "⚠️ Đang dùng `movies_mapped.csv` gốc.\n\n💡 *Hãy chạy file `download_data.py` ngoài Terminal để tải toàn bộ cốt truyện.*")
 
-# PHA CHẾ ĐIỆN ẢNH AI (CINEMATIC ALCHEMIST ENGINE)(GỌP 2 PHIM)
-
-if app_mode == "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)":
-    st.header("🧪 Cinematic Alchemist Engine (Thuật Toán Pha Chế Điện Ảnh)")
+# ==============================================================================
+# PHÂN HỆ: TÌM PHIM BẰNG MÔ TẢ CỐT TRUYỆN (HYBRID SEMANTIC SEARCH - TỐI ƯU HÓA THUẦN CỐT TRUYỆN)
+# ==============================================================================
+if app_mode == "🤖 Tìm Phim Qua Mô Tả Cốt Truyện (Semantic AI)":
+    st.header("🤖 Pure Plot Semantic Search (Tìm Phim Qua Mô Tả Cốt Truyện Thuần Túy)")
     st.markdown(
-        "💡 **Cơ sở khoa học:** Phân hệ này cho phép bạn **hòa trộn mã gene nghệ thuật** của 2 bộ phim khác nhau. Hệ thống sẽ trích xuất Vector Nhúng 32 chiều (Latent Space Embedding) của chúng từ mạng Neural NCF, thực hiện phép toán nội suy tuyến tính theo tỷ lệ phần trăm bạn mong muốn, từ đó truy vết ra những tác phẩm thực tế nằm chính xác tại tọa độ giao thoa.")
+        "💡 **Kiến trúc tối ưu:** Ưu tiên **80% Vector Ngữ Nghĩa SBERT** cho cốt truyện, hỗ trợ **15% TF-IDF** và **5% Keyword Boost**."
+    )
 
-    # Cung cấp 2 chế độ điều khiển cho người dùng trực quan
+    plot_query = st.text_area(
+        "📝 Nhập câu mô tả nội dung, bối cảnh, nhân vật hoặc diễn biến phim bạn muốn tìm:",
+        placeholder="Ví dụ: A young wizard boy attends a magical school, makes friends, and faces dark forces...",
+        height=110
+    )
+
+    if st.button("🔍 GIẢI MÃ CỐT TRUYỆN & TÌM PHIM"):
+        if not plot_query.strip():
+            st.error("Vui lòng nhập nội dung mô tả bộ phim!")
+        else:
+            with st.spinner("🧠 AI đang phân tích ma trận ngữ nghĩa cốt truyện..."):
+                start_perf = time.perf_counter()
+
+                # 1. Điểm Ngữ nghĩa SBERT (Đại diện cho cốt truyện)
+                if HAS_SBERT and overview_embeddings is not None:
+                    query_vec = sbert_model.encode([plot_query], convert_to_numpy=True)
+                    dense_scores = cosine_similarity(query_vec, overview_embeddings).flatten()
+                else:
+                    dense_scores = np.zeros(len(movies_df))
+
+                # 2. Điểm Từ khóa TF-IDF
+                tfidf_query = tfidf_vectorizer.transform([plot_query])
+                sparse_scores = cosine_similarity(tfidf_query, tfidf_matrix).flatten()
+
+                # 3. Keyword Boosting (Thu nhỏ trọng số để không chèn ép ngữ nghĩa)
+                words = re.findall(r'\b[a-zA-Z]{3,}\b', plot_query.lower())
+                stopwords = {'this', 'film', 'series', 'set', 'and', 'follows', 'the', 'for', 'with', 'one', 'most',
+                             'all', 'time', 'about', 'from', 'that', 'they', 'them', 'their', 'movie', 'story'}
+                keywords = [w for w in words if w not in stopwords]
+
+                boost_scores = np.zeros(len(movies_df))
+                if keywords:
+                    for kw in keywords:
+                        title_match = movies_df['title'].str.lower().str.contains(kw, regex=False).fillna(False)
+                        overview_match = movies_df['overview'].str.lower().str.contains(kw, regex=False).fillna(False)
+                        boost_scores += (title_match.astype(float) * 0.1) + (overview_match.astype(float) * 0.05)
+                    max_b = np.max(boost_scores)
+                    if max_b > 0:
+                        boost_scores = boost_scores / max_b
+
+                # 4. Công thức Tổng hợp Tối ưu thuần Cốt truyện (Pure Plot Weighting)
+                if HAS_SBERT and overview_embeddings is not None:
+                    final_scores = (0.80 * dense_scores) + (0.15 * sparse_scores) + (0.05 * boost_scores)
+                else:
+                    final_scores = (0.80 * sparse_scores) + (0.20 * boost_scores)
+
+                top_indices = np.argsort(final_scores)[::-1][:top_k]
+                end_perf = time.perf_counter()
+
+                st.success(f"🎉 Hoàn tất phân tích ngữ nghĩa cốt truyện trong **{(end_perf - start_perf) * 1000:.2f} ms**!")
+
+                cols = st.columns(5)
+                for i, idx in enumerate(top_indices):
+                    m_info = movies_df.iloc[idx]
+                    title = m_info['title']
+                    genres_raw = str(m_info['genres']).split('|')
+                    overview_text = str(m_info.get('overview', 'No overview available.'))
+                    poster_url = get_movie_poster(title, m_info.get('poster_url'))
+                    match_score = min(99.9, max(50.0, final_scores[idx] * 100 if final_scores[idx] < 1.0 else 95.0))
+
+                    with cols[i % 5]:
+                        st.image(poster_url, use_container_width=True)
+                        badges = "".join([f'<span class="genre-tag">{g}</span>' for g in genres_raw])
+                        st.markdown(f"""
+                            <h5 style="margin:5px 0; font-size:13px; font-weight:bold; height:35px; overflow:hidden;">{title}</h5>
+                            <div>{badges}</div>
+                            <span style="font-size:12px; color:#2ed573; font-weight:bold;">🎯 ĐỘ KHỚP HYBRID: {match_score:.1f}%</span>
+                            <div class="overview-text" title="{overview_text}">📖 {overview_text}</div>
+                        """, unsafe_allow_html=True)
+
+# ==============================================================================
+# PHÂN HỆ: PHA CHẾ ĐIỆN ẢNH AI (CINEMATIC ALCHEMIST)
+# ==============================================================================
+elif app_mode == "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)":
+    st.header("🧪 Cinematic Alchemist Engine (Thuật Toán Pha Chế Điện Ảnh)")
+    st.markdown("💡 **Cơ sở khoa học:** Trích xuất Vector Nhúng 32 chiều và thực hiện phép toán nội suy tuyến tính.")
+
     input_method = st.radio("Lựa chọn phương thức nhập công thức:", ["🎛️ Bảng điều khiển thanh trượt (Sliders)",
                                                                      "✍️ Nhập công thức tự nhiên (Natural Language Formula)"])
 
-    # Khởi tạo mặc định
     movie_a_title = movies_df['title'].values[0]
     movie_b_title = movies_df['title'].values[1]
     ratio_a = 50
@@ -194,28 +329,20 @@ if app_mode == "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)":
     if input_method == "🎛️ Bảng điều khiển thanh trượt (Sliders)":
         col_blend1, col_blend2 = st.columns(2)
         with col_blend1:
-            movie_a_title = st.selectbox("🎬 Bộ phim gốc A (Đóng vai trò chủ thể nền tảng):", movies_df['title'].values,
-                                         index=0)
+            movie_a_title = st.selectbox("🎬 Bộ phim gốc A:", movies_df['title'].values, index=0)
         with col_blend2:
-            movie_b_title = st.selectbox("🎭 Bộ phim gốc B (Đóng vai trò hương vị bổ sung):", movies_df['title'].values,
+            movie_b_title = st.selectbox("🎭 Bộ phim gốc B:", movies_df['title'].values,
                                          index=min(1, len(movies_df) - 1))
 
-        ratio_a = st.slider("⚖️ Tỷ lệ pha trộn nguyên chất (Phim A đóng góp):", min_value=10, max_value=90, value=50,
-                            step=5, format="%d%%")
+        ratio_a = st.slider("⚖️ Tỷ lệ pha trộn (Phim A đóng góp):", min_value=10, max_value=90, value=50, step=5,
+                            format="%d%%")
         st.caption(
             f"🧪 **Công thức thiết lập:** `{ratio_a}%` **{movie_a_title}** + `{100 - ratio_a}%` **{movie_b_title}**")
-
     else:
         user_formula = st.text_input("Gõ câu lệnh pha chế của bạn tại đây:",
                                      placeholder="Ví dụ: 70% Inception (2010) + 30% Toy Story (1995)")
-        st.markdown(
-            "<small style='color:#888;'>*Mẹo:* Bạn có thể gõ tỷ lệ phần trăm tùy ý kèm tên phim. Hệ thống sử dụng NLP lai để bóc tách tự động.</small>",
-            unsafe_allow_html=True)
-
         if user_formula:
-            # Trích xuất phần trăm bằng Regex
             percentages = re.findall(r'(\d+)\s*%', user_formula)
-            # Tách chuỗi theo ký tự dấu cộng
             parts = user_formula.split('+') if '+' in user_formula else [user_formula]
 
             if len(parts) >= 1:
@@ -223,8 +350,7 @@ if app_mode == "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)":
                 sim_a = cosine_similarity(q_vec_a, tfidf_matrix).flatten()
                 if np.max(sim_a) > 0.02:
                     movie_a_title = movies_df.iloc[np.argsort(sim_a)[::-1][0]]['title']
-                if len(percentages) >= 1:
-                    ratio_a = int(percentages[0])
+                if len(percentages) >= 1: ratio_a = int(percentages[0])
 
             if len(parts) >= 2:
                 q_vec_b = tfidf_vectorizer.transform([parts[1]])
@@ -233,23 +359,21 @@ if app_mode == "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)":
                     movie_b_title = movies_df.iloc[np.argsort(sim_b)[::-1][0]]['title']
 
             st.info(
-                f"🔮 **AI nhận diện cấu trúc:** Trộn `{ratio_a}%` phim **[{movie_a_title}]** với `{100 - ratio_a}%` phim **[{movie_b_title}]**")
+                f"🔮 **AI nhận diện:** Trộn `{ratio_a}%` **[{movie_a_title}]** + `{100 - ratio_a}%` **[{movie_b_title}]**")
 
     if st.button("🧪 TIẾN HÀNH PHẢN ỨNG VÀ HÒA TRỘN VECTOR"):
         if movie_a_title == movie_b_title:
-            st.error("Lỗi công thức: Vui lòng lựa chọn 2 bộ phim khác biệt nhau để tiến hành pha chế!")
+            st.error("Lỗi công thức: Vui lòng lựa chọn 2 bộ phim khác biệt nhau!")
         else:
-            with st.spinner("🔬 Đang kích hoạt lò phản ứng tuyến tính, trích xuất ma trận nhúng..."):
+            with st.spinner("🔬 Đang kích hoạt lò phản ứng tuyến tính..."):
                 start_perf = time.perf_counter()
 
-                # Truy vết index thực tế của phim trong warehouse
                 movie_a_info = movies_df[movies_df['title'] == movie_a_title].iloc[0]
                 movie_b_info = movies_df[movies_df['title'] == movie_b_title].iloc[0]
 
-                idx_a = int(movie_a_info['movie_idx'])
-                idx_b = int(movie_b_info['movie_idx'])
+                idx_a = int(movie_a_info.get('movie_idx', movie_a_info.name))
+                idx_b = int(movie_b_info.get('movie_idx', movie_b_info.name))
 
-                # Đọc ma trận trọng số từ mô hình NCF
                 model.eval()
                 with torch.no_grad():
                     movie_embeddings = model.movie_embedding.weight.detach().cpu().numpy()
@@ -257,46 +381,30 @@ if app_mode == "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)":
                 vec_a = movie_embeddings[idx_a]
                 vec_b = movie_embeddings[idx_b]
 
-                # Thực hiện phép toán trộn hình học trên Latent Space
                 w_a = ratio_a / 100.0
                 w_b = 1.0 - w_a
                 vec_blended = (w_a * vec_a) + (w_b * vec_b)
                 vec_blended = vec_blended.reshape(1, -1)
 
-                # Quét độ tương đồng Cosine của Vector lai với toàn bộ kho phim
                 blended_sims = cosine_similarity(vec_blended, movie_embeddings).flatten()
-
-                # Lọc kết quả: Sắp xếp giảm dần và loại bỏ chính 2 bộ phim đầu vào
                 sorted_idxs = np.argsort(blended_sims)[::-1]
+
                 valid_recs = []
                 for idx in sorted_idxs:
-                    m_title = movies_df[movies_df['movie_idx'] == idx].iloc[0]['title']
+                    m_title = movies_df.iloc[idx]['title']
                     if m_title != movie_a_title and m_title != movie_b_title:
                         valid_recs.append(idx)
-                    if len(valid_recs) == top_k:
-                        break
+                    if len(valid_recs) == top_k: break
 
                 end_perf = time.perf_counter()
-                st.success(
-                    f"🎉 Đồng bộ hóa thành công! Thời gian xử lý ma trận: {(end_perf - start_perf) * 1000:.2f} ms")
+                st.success(f"🎉 Hòa trộn hoàn tất trong **{(end_perf - start_perf) * 1000:.2f} ms**!")
 
-                # Thuyết minh khoa học dữ liệu
-                g_a = movie_a_info['genres'].replace('|', ', ')
-                g_b = movie_b_info['genres'].replace('|', ', ')
-                st.markdown(f"""
-                ### 🎙️ Phân tích Phép toán Không gian của AI:
-                Bằng cách kéo trượt tọa độ vector từ nhóm thể loại *[{g_a}]* của phim gốc A tiệm cận dần sang nhóm thể loại *[{g_b}]* của phim gốc B, hệ thống đã thiết lập một vùng giao thoa ranh giới lý tưởng.
-
-                Dưới đây là **Top {top_k} tác phẩm sở hữu cấu trúc gene lai** tiệm cận sát nhất với tọa độ toán học mà bạn vừa pha chế:
-                """)
-
-                # Kết xuất lưới đồ họa 5 cột chuẩn Cinematic
                 cols = st.columns(5)
                 for i, idx in enumerate(valid_recs):
-                    m_info = movies_df[movies_df['movie_idx'] == idx].iloc[0]
+                    m_info = movies_df.iloc[idx]
                     title = m_info['title']
-                    genres_raw = m_info['genres'].split('|')
-                    poster_url = get_movie_poster(title)
+                    genres_raw = str(m_info['genres']).split('|')
+                    poster_url = get_movie_poster(title, m_info.get('poster_url'))
                     match_percent = blended_sims[idx] * 100
 
                     with cols[i % 5]:
@@ -308,13 +416,11 @@ if app_mode == "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)":
                             <span style="font-size:12px; color:#E50914; font-weight:bold;">🧪 ĐỘ HÒA HỢP: {match_percent:.1f}%</span>
                         """, unsafe_allow_html=True)
 
-
-# CÁ NHÂN HÓA AI (NCF)
-
+# ==============================================================================
+# PHÂN HỆ: CÁ NHÂN HÓA AI (NCF)
+# ==============================================================================
 elif app_mode == "👤 Cá nhân hóa AI (NCF)":
     st.header("🎯 Gợi ý cá nhân hóa Deep Learning (Bayesian NCF)")
-    st.markdown(
-        "💡 **Explainable AI (XAI):** Hệ thống tích hợp khả năng tính toán độ tương đồng Cosine của Vector nhúng để giải thích lý do gợi ý.")
     cold_start_mode = st.checkbox("🆕 Tôi là người dùng mới (Giả lập Khởi động lạnh - Cold Start)")
     user_id_input = 80000
     selected_genre = "Tất cả thể loại"
@@ -328,22 +434,20 @@ elif app_mode == "👤 Cá nhân hóa AI (NCF)":
         with col_input2:
             selected_genre = st.selectbox("Lọc nhanh theo dòng phim:", ["Tất cả thể loại"] + all_genres)
     else:
-        cold_start_movies = st.multiselect("Chọn tối thiểu 3 bộ phim bạn yêu thích nhất để tạo lập Hồ sơ số:",
-                                           movies_df['title'].values)
+        cold_start_movies = st.multiselect("Chọn tối thiểu 3 bộ phim bạn yêu thích nhất:", movies_df['title'].values)
         selected_genre = st.selectbox("Lọc nhanh theo dòng phim:", ["Tất cả thể loại"] + all_genres)
 
     if st.button("🚀 TRUY XUẤT HỒ SƠ VECTOR"):
         if cold_start_mode and len(cold_start_movies) < 3:
-            st.error("Vui lòng chọn ít nhất 3 bộ phim để thuật toán Cold-Start phân tích chính xác hành vi.")
+            st.error("Vui lòng chọn ít nhất 3 bộ phim để phân tích!")
         else:
-            with st.spinner('Hạ tầng đang phân tích Vector Hành vi...'):
+            with st.spinner('Hạ tầng đang phân tích Vector...'):
                 start_perf = time.perf_counter()
                 model.train()
-                movie_tensor = torch.tensor(list(range(10524)), dtype=torch.long).to(device)
+                movie_tensor = torch.tensor(list(range(len(movies_df))), dtype=torch.long).to(device)
 
                 if cold_start_mode:
-                    selected_indices = [movies_df[movies_df['title'] == title].iloc[0]['movie_idx'] for title in
-                                        cold_start_movies]
+                    selected_indices = [movies_df[movies_df['title'] == title].index[0] for title in cold_start_movies]
                     selected_indices_t = torch.tensor(selected_indices, dtype=torch.long).to(device)
                     with torch.no_grad():
                         movie_embs = model.movie_embedding(selected_indices_t)
@@ -373,8 +477,8 @@ elif app_mode == "👤 Cá nhân hóa AI (NCF)":
                     alignments = torch.matmul(m_norm, u_norm).cpu().numpy()
 
                 for idx in all_indices:
-                    movie_info = movies_df[movies_df['movie_idx'] == idx].iloc[0]
-                    if selected_genre == "Tất cả thể loại" or selected_genre in movie_info['genres'].split('|'):
+                    movie_info = movies_df.iloc[idx]
+                    if selected_genre == "Tất cả thể loại" or selected_genre in str(movie_info['genres']).split('|'):
                         valid_indices.append(idx)
                         valid_scores.append(mean_scores[idx])
                         valid_std.append(std_scores[idx])
@@ -382,25 +486,19 @@ elif app_mode == "👤 Cá nhân hóa AI (NCF)":
                     if len(valid_indices) == top_k: break
 
                 end_perf = time.perf_counter()
-                st.markdown(
-                    f"⏱️ **Hồ sơ hiệu năng (System Profile):** Tổng hợp hồ sơ mất **{(end_perf - start_perf) * 1000:.2f} ms** trên cấu trúc **{str(device).upper()}**.")
 
                 if not valid_indices:
                     st.warning("Không tìm thấy bộ phim nào phù hợp.")
                 else:
                     cols = st.columns(5)
                     for i, idx in enumerate(valid_indices):
-                        movie_info = movies_df[movies_df['movie_idx'] == idx].iloc[0]
+                        movie_info = movies_df.iloc[idx]
                         title = movie_info['title']
-                        genres_raw = movie_info['genres'].split('|')
-                        poster_url = get_movie_poster(title)
+                        genres_raw = str(movie_info['genres']).split('|')
+                        poster_url = get_movie_poster(title, movie_info.get('poster_url'))
                         uncertainty = valid_std[i]
 
-                        if uncertainty < 0.05:
-                            confidence_badge = f'<span class="metric-badge badge-success">Tin cậy cao (σ={uncertainty:.3f})</span>'
-                        else:
-                            confidence_badge = f'<span class="metric-badge badge-warning">Cần khám phá (σ={uncertainty:.3f})</span>'
-
+                        confidence_badge = f'<span class="metric-badge badge-success">Tin cậy cao</span>' if uncertainty < 0.05 else f'<span class="metric-badge badge-warning">Cần khám phá</span>'
                         alignment_percent = max(0.0, float(valid_alignments[i])) * 100
 
                         with cols[i % 5]:
@@ -414,16 +512,15 @@ elif app_mode == "👤 Cá nhân hóa AI (NCF)":
                                 <div style="margin-top:4px;"><span class="badge-xai">🧬 Hợp gu: {alignment_percent:.1f}%</span></div>
                             """, unsafe_allow_html=True)
 
-# TÌM KIẾM SEMANTIC LAI (NLP)
+# ==============================================================================
+# PHÂN HỆ: TÌM KIẾM SEMANTIC LAI (NLP)
+# ==============================================================================
 elif app_mode == "🔍 Tìm Phim Qua Từ Khóa/Tên (NLP)":
     st.header("🔍 Dense-Sparse Hybrid Semantic Search Engine")
-    st.markdown(
-        "💡 **Công nghệ Độc quyền:** Phối hợp logic toán học của **TF-IDF (Sparse)** và **Trọng số nhúng mạng Neural (Dense Latent Similarity)**.")
     search_query = st.selectbox("Chọn bộ phim gốc làm tâm điểm dữ liệu:", movies_df['title'].values)
     beta = st.slider("Hệ số lai cấu trúc (Beta - β):", min_value=0.0, max_value=1.0, value=0.6, step=0.1)
 
     if st.button("🔍 PHÂN TÍCH ĐẶC TRƯNG TIỀM ẨN"):
-        start_perf = time.perf_counter()
         query_idx = movies_df[movies_df['title'] == search_query].index[0]
         sparse_sim = cosine_similarity(tfidf_matrix[query_idx], tfidf_matrix).flatten()
 
@@ -436,16 +533,12 @@ elif app_mode == "🔍 Tìm Phim Qua Từ Khóa/Tên (NLP)":
         hybrid_sim = beta * sparse_sim + (1.0 - beta) * dense_sim
         similar_indices = np.argsort(hybrid_sim)[::-1][1:top_k + 1]
 
-        end_perf = time.perf_counter()
-        st.markdown(
-            f"⏱️ **Hồ sơ hiệu năng (System Profile):** Trích xuất Vector hoàn thành trong **{(end_perf - start_perf) * 1000:.2f} ms**.")
-
         cols = st.columns(5)
         for i, idx in enumerate(similar_indices):
             movie_info = movies_df.iloc[idx]
             title = movie_info['title']
-            genres_raw = movie_info['genres'].split('|')
-            poster_url = get_movie_poster(title)
+            genres_raw = str(movie_info['genres']).split('|')
+            poster_url = get_movie_poster(title, movie_info.get('poster_url'))
 
             with cols[i % 5]:
                 st.image(poster_url, use_container_width=True)
@@ -456,149 +549,110 @@ elif app_mode == "🔍 Tìm Phim Qua Từ Khóa/Tên (NLP)":
                     <span style="font-size:12px; color:#00d2d3; font-weight:bold;">🧬 TƯƠNG ĐỒNG LAI: {hybrid_sim[idx] * 100:.1f}%</span>
                 """, unsafe_allow_html=True)
 
-# ĐỒ THỊ TRI THỨC TƯƠNG TÁC (KNOWLEDGE GRAPH)
+# ==============================================================================
+# PHÂN HỆ: ĐỒ THỊ TRI THỨC TƯƠNG TÁC (KNOWLEDGE GRAPH)
+# ==============================================================================
 elif app_mode == "🌌 Đồ thị Tri thức (Knowledge Graph)":
     st.header("🌌 Neural Knowledge Graph - Vũ trụ Điện ảnh 2D/3D")
-    st.markdown(
-        "💡 **Cơ sở khoa học:** Trực quan hóa ma trận trọng số (Weight Matrix) của mô hình NCF. Hệ thống tự động thiết lập các cạnh (Edges) giữa các bộ phim có khoảng cách Cosine ngắn nhất.")
 
     if not HAS_PYVIS:
         st.error("⚠️ Lỗi môi trường: Hệ thống yêu cầu thư viện `pyvis`. Vui lòng chạy lệnh: `pip install pyvis`")
     else:
-        root_movie = st.selectbox("🎯 Chọn bộ phim làm Tâm điểm (Root Node) của Vũ trụ:", movies_df['title'].values)
-        num_neighbors = st.slider("Mật độ liên kết (Số vệ tinh xung quanh):", 5, 30, 15)
+        root_movie = st.selectbox("🎯 Chọn bộ phim làm Tâm điểm (Root Node):", movies_df['title'].values)
+        num_neighbors = st.slider("Mật độ liên kết:", 5, 30, 15)
 
         if st.button("🚀 KHỞI TẠO KHÔNG GIAN ĐỒ THỊ"):
-            with st.spinner("Đang biên dịch ma trận khoảng cách thành hình học không gian..."):
+            with st.spinner("Đang biên dịch ma trận đồ thị..."):
                 query_idx = movies_df[movies_df['title'] == root_movie].index[0]
+
                 model.eval()
                 with torch.no_grad():
                     movie_embeddings = model.movie_embedding.weight.detach().cpu().numpy()
+
                 query_dense = movie_embeddings[query_idx].reshape(1, -1)
-                dense_sim = cosine_similarity(query_dense, movie_embeddings).flatten()
-                similar_indices = np.argsort(dense_sim)[::-1][1:num_neighbors + 1]
+                sims = cosine_similarity(query_dense, movie_embeddings).flatten()
+                top_neighbor_idxs = np.argsort(sims)[::-1][1:num_neighbors + 1]
 
-                net = Network(height='600px', width='100%', bgcolor='#0a0a0f', font_color='white', select_menu=True,
-                              cdn_resources='remote')
-                net.barnes_hut(gravity=-8000, central_gravity=0.3, spring_length=150)
+                # Khởi tạo đồ thị PyVis
+                net = Network(height="600px", width="100%", bgcolor="#050508", font_color="white")
+                net.add_node(root_movie, label=root_movie, color="#E50914", size=25, title="Root Movie")
 
-                root_genres = movies_df.iloc[query_idx]['genres'].replace('|', ', ')
-                net.add_node(int(query_idx), label=root_movie, title=f"Tâm điểm\nThe loại: {root_genres}",
-                             color='#E50914', size=35)
+                for n_idx in top_neighbor_idxs:
+                    m_row = movies_df.iloc[n_idx]
+                    m_title = m_row['title']
+                    sim_val = sims[n_idx]
+                    net.add_node(m_title, label=m_title, color="#00d2d3", size=15, title=f"Match: {sim_val * 100:.1f}%")
+                    net.add_edge(root_movie, m_title, value=float(sim_val), title=f"{sim_val * 100:.1f}% Similarity")
 
-                for idx in similar_indices:
-                    movie_title = movies_df.iloc[idx]['title']
-                    genres = movies_df.iloc[idx]['genres'].replace('|', ', ')
+                    # Thêm node thể loại chính
+                    primary_genre = str(m_row['genres']).split('|')[0]
+                    net.add_node(primary_genre, label=primary_genre, color="#ff9f43", shape="ellipse", size=10)
+                    net.add_edge(m_title, primary_genre, color="#333344")
 
-                    similarity = float(dense_sim[idx] * 100)
-                    edge_width = float((similarity - 50) / 10 if similarity > 50 else 1.0)
+                graph_path = "knowledge_graph.html"
+                net.save_graph(graph_path)
+                with open(graph_path, "r", encoding="utf-8") as f:
+                    html_content = f.read()
+                components.html(html_content, height=620, scrolling=False)
 
-                    net.add_node(int(idx), label=movie_title,
-                                 title=f"Độ tương đồng: {similarity:.1f}%\nThe loại: {genres}", color='#00d2d3',
-                                 size=20)
-                    net.add_edge(int(query_idx), int(idx), value=edge_width, title=f"{similarity:.1f}%",
-                                 color='rgba(255,255,255,0.2)')
-
-                path = "knowledge_graph.html"
-                net.save_graph(path)
-                st.success("Tạo Đồ thị thành công! Bạn có thể kéo thả, phóng to/thu nhỏ không gian bên dưới.")
-
-                with open(path, 'r', encoding='utf-8') as f:
-                    html_data = f.read()
-
-                html_data = html_data.replace('src="lib/bindings/vis-network.min.js"',
-                                              'src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/vis-network.min.js"')
-                html_data = html_data.replace('href="lib/bindings/vis-network.min.css"',
-                                              'href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/vis-network.min.css"')
-
-                components.html(html_data, height=620)
-
-
-#TÌM KIẾM THEO THỂ LOẠI
-
+# ==============================================================================
+# PHÂN HỆ: TÌM PHIM THEO THỂ LOẠI
+# ==============================================================================
 elif app_mode == "🏷️ Tìm Phim Theo Thể Loại":
-    st.header("🏷️ Genre Query Engine - Tìm kiếm phim theo tổ hợp danh mục")
-    target_genres = st.multiselect("Nhấp chọn các thể loại phim muốn tìm kiếm:", all_genres, default=[all_genres[0]])
-    match_type = st.radio("Điều kiện lọc thể loại:", ["Chỉ cần chứa ít nhất một dòng phim đã chọn (Logic HOẶC)",
-                                                      "Bắt buộc phải chứa toàn bộ các dòng phim đã chọn (Logic VÀ)"],
-                          horizontal=True)
+    st.header("🏷️ Khám Phá Điện Ảnh Theo Thể Loại")
+    selected_g = st.selectbox("Chọn thể loại phim:", all_genres)
+    sort_by = st.selectbox("Sắp xếp theo:", ["Ngẫu nhiên khám phá", "Tên phim (A-Z)"])
 
-    if st.button("🔍 TIẾN HÀNH TRUY VẤN WAREHOUSE"):
-        if not target_genres:
-            st.error("Vui lòng chọn ít nhất một thể loại để truy vấn!")
-        else:
-            with st.spinner('Đang truy vấn kho dữ liệu phim...'):
-                if "ít nhất một" in match_type:
-                    mask = movies_df['genres'].apply(lambda x: any(g in x.split('|') for g in target_genres))
-                else:
-                    mask = movies_df['genres'].apply(lambda x: all(g in x.split('|') for g in target_genres))
+    filtered_df = movies_df[movies_df['genres'].fillna('').str.contains(selected_g, regex=False)]
+    if sort_by == "Tên phim (A-Z)":
+        filtered_df = filtered_df.sort_values(by="title")
+    else:
+        filtered_df = filtered_df.sample(frac=1, random_state=42)
 
-                filtered_movies = movies_df[mask]
+    display_df = filtered_df.head(top_k)
 
-                if len(filtered_movies) == 0:
-                    st.warning("⚠️ Không tìm thấy bộ phim nào chứa đúng tổ hợp cấu trúc thể loại này.")
-                else:
-                    st.success(
-                        f"Tìm thấy tổng cộng {len(filtered_movies)} phim. Hiển thị top {min(top_k, len(filtered_movies))} kết quả:")
-                    display_df = filtered_movies.head(top_k)
-                    cols = st.columns(5)
-                    for i, row in display_df.reset_index().iterrows():
-                        title = row['title']
-                        genres_raw = row['genres'].split('|')
-                        poster_url = get_movie_poster(title)
+    cols = st.columns(5)
+    for i, (_, row) in enumerate(display_df.iterrows()):
+        title = row['title']
+        genres_raw = str(row['genres']).split('|')
+        poster_url = get_movie_poster(title, row.get('poster_url'))
+        overview_text = str(row.get('overview', 'No overview available.'))
 
-                        with cols[i % 5]:
-                            st.image(poster_url, use_container_width=True)
-                            badges = "".join([f'<span class="genre-tag">{g}</span>' for g in genres_raw])
-                            st.markdown(f"""
-                                <h5 style="margin:5px 0; font-size:13px; font-weight:bold; height:35px; overflow:hidden;">{title}</h5>
-                                <div>{badges}</div>
-                                <span style="font-size:12px; color:#ff9f43; font-weight:bold;">🎬 INDEX ID: #{row['movie_idx']}</span>
-                            """, unsafe_allow_html=True)
+        with cols[i % 5]:
+            st.image(poster_url, use_container_width=True)
+            badges = "".join([f'<span class="genre-tag">{g}</span>' for g in genres_raw])
+            st.markdown(f"""
+                <h5 style="margin:5px 0; font-size:13px; font-weight:bold; height:35px; overflow:hidden;">{title}</h5>
+                <div>{badges}</div>
+                <div class="overview-text" title="{overview_text}">📖 {overview_text}</div>
+            """, unsafe_allow_html=True)
 
 # ==============================================================================
-# PHÂN HỆ BỊ THIẾU: PHÒNG THÍ NGHIỆM HỌC MÁY (ĐÃ RE-WRITE HOÀN CHỈNH)
+# PHÂN HỆ: PHÒNG THÍ NGHIỆM HỌC MÁY
 # ==============================================================================
-else:
-    st.header("🔬 Phòng thí nghiệm tối ưu hóa Gradient Descent & Convergence")
-    col_rate1, col_rate2 = st.columns([2, 1])
-    with col_rate1:
-        chosen_movie = st.selectbox("Chọn bộ phim tương tác gán nhãn:", movies_df['title'].values)
-    with col_rate2:
-        rating = st.slider("Chấm điểm (Sao):", 1, 5, 5)
+elif app_mode == "🔬 Phòng Thí Nghiệm Học Máy":
+    st.header("🔬 Phòng Thí Nghiệm & Trực Quan Hóa Không Gian Vector")
+    st.markdown("Giảm chiều dữ liệu Vector NCF (32 chiều) xuống Không gian 2D bằng PCA để phân tích cụm phân bố phim.")
 
-    if st.button("➕ Ghi nhận điểm số cục bộ"):
-        m_idx = movies_df[movies_df['title'] == chosen_movie].iloc[0]['movie_idx']
-        st.session_state.user_ratings[int(m_idx)] = float(rating) / 5.0
-        st.success(f"Đã lưu phản hồi vào Session: {chosen_movie} -> {rating}⭐")
+    if st.button("🚀 TRỰC QUAN HÓA BẰNG PCA (2D SPATIAL PROJECTION)"):
+        with st.spinner("Đang tính toán ma trận chiếu PCA..."):
+            model.eval()
+            with torch.no_grad():
+                movie_embeddings = model.movie_embedding.weight.detach().cpu().numpy()
 
-    if st.session_state.user_ratings:
-        st.markdown("### 📋 Danh sách tập mẫu thử nghiệm (Training Dataset):")
-        for m_idx, score in st.session_state.user_ratings.items():
-            m_title = movies_df[movies_df['movie_idx'] == m_idx].iloc[0]['title']
-            st.markdown(f"`Movie ID #{m_idx:05d}` — {m_title} — Đã chấm: **{score * 5:.0f}⭐**")
+            sample_size = min(1000, len(movies_df))
+            sample_indices = np.random.choice(len(movies_df), sample_size, replace=False)
+            sample_embeddings = movie_embeddings[sample_indices]
 
-        st.markdown("---")
-        st.subheader("⚙️ Cấu hình cấu trúc siêu tham số (Hyperparameters)")
-        c_opt1, c_opt2, c_opt3 = st.columns(3)
-        with c_opt1:
-            opt_choice = st.selectbox("Thuật toán tối ưu (Optimizer):", ["Adam", "AdamW", "SGD"])
-        with c_opt2:
-            lr_val = st.slider("Tốc độ học (Learning Rate):", min_value=0.001, max_value=0.1, value=0.01, step=0.001)
-        with c_opt3:
-            epochs = st.slider("Số lượng Epochs huấn luyện:", min_value=1, max_value=10, value=3)
+            pca = PCA(n_components=2)
+            coords_2d = pca.fit_transform(sample_embeddings)
 
-        if st.button("🏋️ HUẤN LUYỆN ĐIỀU CHỈNH VECTOR"):
-            st.info("Đang kích hoạt quy trình Gradient Descent tối ưu hóa không gian nhúng...")
-            progress_bar = st.progress(0)
-            status_text = st.empty()
+            pca_df = pd.DataFrame({
+                'X': coords_2d[:, 0],
+                'Y': coords_2d[:, 1],
+                'Title': movies_df.iloc[sample_indices]['title'].values,
+                'Main Genre': movies_df.iloc[sample_indices]['genres'].apply(lambda x: str(x).split('|')[0]).values
+            })
 
-            # Giả lập quá trình học máy hội tụ động
-            for epoch in range(epochs):
-                time.sleep(0.4)
-                loss_val = 0.5 / (epoch + 1) + np.random.uniform(0, 0.04)
-                progress_bar.progress(int((epoch + 1) / epochs * 100))
-                status_text.markdown(
-                    f"🔄 **Epoch {epoch + 1}/{epochs}** — Loss hiện tại: `{loss_val:.4f}` — Cập nhật ma trận thành công!")
-
-            st.success("🎉 Quá trình tinh chỉnh hoàn tất! Các Vector đặc trưng ẩn đã được tối ưu hội tụ cục bộ.")
+            st.scatter_chart(pca_df, x='X', y='Y', color='Main Genre', size=20)
+            st.success("✅ Đã hoàn tất chiếu không gian Vector nhúng 32D sang 2D!")
