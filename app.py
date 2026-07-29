@@ -17,6 +17,7 @@ from sklearn.decomposition import PCA
 # Hỗ trợ mô hình AI Ngữ nghĩa (Sentence Transformers)
 try:
     from sentence_transformers import SentenceTransformer
+
     HAS_SBERT = True
 except ImportError:
     HAS_SBERT = False
@@ -25,6 +26,7 @@ except ImportError:
 try:
     from pyvis.network import Network
     import streamlit.components.v1 as components
+
     HAS_PYVIS = True
 except ImportError:
     HAS_PYVIS = False
@@ -157,14 +159,14 @@ def load_resources():
         model.load_state_dict(torch.load('ncf_movie_recommender.pth', map_location=torch.device('cpu')))
     model = model.to(device)
 
-    # 2. Đọc file dữ liệu (Tự động ưu tiên đọc file enriched đã tải đầy đủ)
+    # 2. Đọc file dữ liệu
     csv_path = 'movies_enriched.csv' if os.path.exists('movies_enriched.csv') else 'movies_mapped.csv'
     movies_df = pd.read_csv(csv_path)
 
     if 'overview' not in movies_df.columns: movies_df['overview'] = "No overview available."
     if 'poster_url' not in movies_df.columns: movies_df['poster_url'] = ""
 
-    # 3. Khởi tạo TF-IDF
+    # 3. Khởi tạo TF-IDF cho cốt truyện
     tfidf = TfidfVectorizer(stop_words='english', ngram_range=(1, 2))
     enhanced_corpus = (
             movies_df['genres'].str.replace('|', ' ', regex=False) + ' ' +
@@ -215,32 +217,28 @@ with st.sidebar:
             "🤖 Tìm Phim Qua Mô Tả Cốt Truyện (Semantic AI)",
             "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)",
             "👤 Cá nhân hóa AI (NCF)",
-            "🔍 Tìm Phim Qua Từ Khóa/Tên (NLP)",
+            "🔍 Tìm Phim Qua Từ Khóa/Tên Phim",
             "🌌 Đồ thị Tri thức (Knowledge Graph)",
-            "🏷️ Tìm Phim Theo Thể Loại",
-            "🔬 Phòng Thí Nghiệm Học Máy"
+            "🏷️ Tìm Phim Theo Thể Loại"
         ]
     )
     st.markdown("---")
     top_k = st.slider("🍿 Số lượng phim hiển thị (Top K):", min_value=5, max_value=20, value=10)
 
-    # Hiển thị trạng thái dữ liệu
     st.markdown("---")
     st.subheader("📂 DỮ LIỆU SỬ DỤNG")
     if os.path.exists('movies_enriched.csv'):
         st.success("✅ Đang dùng `movies_enriched.csv` (Đã có Cốt truyện & Poster)")
     else:
-        st.warning(
-            "⚠️ Đang dùng `movies_mapped.csv` gốc.\n\n💡 *Hãy chạy file `download_data.py` ngoài Terminal để tải toàn bộ cốt truyện.*")
+        st.warning("⚠️ Đang dùng `movies_mapped.csv` gốc.")
 
 # ==============================================================================
-# PHÂN HỆ: TÌM PHIM BẰNG MÔ TẢ CỐT TRUYỆN (HYBRID SEMANTIC SEARCH - TỐI ƯU HÓA THUẦN CỐT TRUYỆN)
+# PHÂN HỆ: TÌM PHIM BẰNG MÔ TẢ CỐT TRUYỆN
 # ==============================================================================
 if app_mode == "🤖 Tìm Phim Qua Mô Tả Cốt Truyện (Semantic AI)":
     st.header("🤖 Pure Plot Semantic Search (Tìm Phim Qua Mô Tả Cốt Truyện Thuần Túy)")
     st.markdown(
-        "💡 **Kiến trúc tối ưu:** Ưu tiên **80% Vector Ngữ Nghĩa SBERT** cho cốt truyện, hỗ trợ **15% TF-IDF** và **5% Keyword Boost**."
-    )
+        "💡 **Kiến trúc tối ưu:** Ưu tiên **80% Vector Ngữ Nghĩa SBERT** cho cốt truyện, hỗ trợ **15% TF-IDF** và **5% Keyword Boost**.")
 
     plot_query = st.text_area(
         "📝 Nhập câu mô tả nội dung, bối cảnh, nhân vật hoặc diễn biến phim bạn muốn tìm:",
@@ -255,18 +253,15 @@ if app_mode == "🤖 Tìm Phim Qua Mô Tả Cốt Truyện (Semantic AI)":
             with st.spinner("🧠 AI đang phân tích ma trận ngữ nghĩa cốt truyện..."):
                 start_perf = time.perf_counter()
 
-                # 1. Điểm Ngữ nghĩa SBERT (Đại diện cho cốt truyện)
                 if HAS_SBERT and overview_embeddings is not None:
                     query_vec = sbert_model.encode([plot_query], convert_to_numpy=True)
                     dense_scores = cosine_similarity(query_vec, overview_embeddings).flatten()
                 else:
                     dense_scores = np.zeros(len(movies_df))
 
-                # 2. Điểm Từ khóa TF-IDF
                 tfidf_query = tfidf_vectorizer.transform([plot_query])
                 sparse_scores = cosine_similarity(tfidf_query, tfidf_matrix).flatten()
 
-                # 3. Keyword Boosting (Thu nhỏ trọng số để không chèn ép ngữ nghĩa)
                 words = re.findall(r'\b[a-zA-Z]{3,}\b', plot_query.lower())
                 stopwords = {'this', 'film', 'series', 'set', 'and', 'follows', 'the', 'for', 'with', 'one', 'most',
                              'all', 'time', 'about', 'from', 'that', 'they', 'them', 'their', 'movie', 'story'}
@@ -282,7 +277,6 @@ if app_mode == "🤖 Tìm Phim Qua Mô Tả Cốt Truyện (Semantic AI)":
                     if max_b > 0:
                         boost_scores = boost_scores / max_b
 
-                # 4. Công thức Tổng hợp Tối ưu thuần Cốt truyện (Pure Plot Weighting)
                 if HAS_SBERT and overview_embeddings is not None:
                     final_scores = (0.80 * dense_scores) + (0.15 * sparse_scores) + (0.05 * boost_scores)
                 else:
@@ -291,7 +285,8 @@ if app_mode == "🤖 Tìm Phim Qua Mô Tả Cốt Truyện (Semantic AI)":
                 top_indices = np.argsort(final_scores)[::-1][:top_k]
                 end_perf = time.perf_counter()
 
-                st.success(f"🎉 Hoàn tất phân tích ngữ nghĩa cốt truyện trong **{(end_perf - start_perf) * 1000:.2f} ms**!")
+                st.success(
+                    f"🎉 Hoàn tất phân tích ngữ nghĩa cốt truyện trong **{(end_perf - start_perf) * 1000:.2f} ms**!")
 
                 cols = st.columns(5)
                 for i, idx in enumerate(top_indices):
@@ -513,41 +508,63 @@ elif app_mode == "👤 Cá nhân hóa AI (NCF)":
                             """, unsafe_allow_html=True)
 
 # ==============================================================================
-# PHÂN HỆ: TÌM KIẾM SEMANTIC LAI (NLP)
+# PHÂN HỆ: TÌM PHIM THEO TÊN / TỪ KHÓA TRỰC TIẾP (ĐÃ ĐƯỢC SỬA)
 # ==============================================================================
-elif app_mode == "🔍 Tìm Phim Qua Từ Khóa/Tên (NLP)":
-    st.header("🔍 Dense-Sparse Hybrid Semantic Search Engine")
-    search_query = st.selectbox("Chọn bộ phim gốc làm tâm điểm dữ liệu:", movies_df['title'].values)
-    beta = st.slider("Hệ số lai cấu trúc (Beta - β):", min_value=0.0, max_value=1.0, value=0.6, step=0.1)
+elif app_mode == "🔍 Tìm Phim Qua Từ Khóa/Tên Phim":
+    st.header("🔍 Tìm Phim Trực Tiếp Theo Tên Phim / Từ Khóa")
+    st.markdown(
+        "💡 **Tìm kiếm tiêu đề:** Nhập tên bộ phim hoặc từ khóa bất kỳ để tìm kiếm chính xác các bộ phim có chứa tiêu đề đó.")
 
-    if st.button("🔍 PHÂN TÍCH ĐẶC TRƯNG TIỀM ẨN"):
-        query_idx = movies_df[movies_df['title'] == search_query].index[0]
-        sparse_sim = cosine_similarity(tfidf_matrix[query_idx], tfidf_matrix).flatten()
+    search_query = st.text_input(
+        "🔎 Nhập tên phim hoặc từ khóa cần tìm:",
+        placeholder="Ví dụ: Toy Story, Batman, Matrix, Star Wars, Harry Potter..."
+    )
 
-        model.eval()
-        with torch.no_grad():
-            movie_embeddings = model.movie_embedding.weight.detach().cpu().numpy()
-        query_dense = movie_embeddings[query_idx].reshape(1, -1)
-        dense_sim = cosine_similarity(query_dense, movie_embeddings).flatten()
+    if st.button("🔍 TÌM KIẾM PHIM"):
+        if not search_query.strip():
+            st.error("Vui lòng nhập tên phim hoặc từ khóa tìm kiếm!")
+        else:
+            with st.spinner("🔍 Đang tra cứu danh mục phim..."):
+                query_clean = search_query.strip().lower()
 
-        hybrid_sim = beta * sparse_sim + (1.0 - beta) * dense_sim
-        similar_indices = np.argsort(hybrid_sim)[::-1][1:top_k + 1]
+                # 1. Khớp từ khóa trực tiếp trên tiêu đề tên phim
+                matched_df = movies_df[movies_df['title'].str.lower().str.contains(query_clean, regex=False)].copy()
 
-        cols = st.columns(5)
-        for i, idx in enumerate(similar_indices):
-            movie_info = movies_df.iloc[idx]
-            title = movie_info['title']
-            genres_raw = str(movie_info['genres']).split('|')
-            poster_url = get_movie_poster(title, movie_info.get('poster_url'))
+                # 2. Dự phòng: Nếu không tìm thấy chính xác, gợi ý các tên phim có nét tương đồng nhất (Character N-gram TF-IDF)
+                if matched_df.empty:
+                    st.warning("⚠️ Không tìm thấy tên phim khớp hoàn toàn. Đang tìm các tiêu đề gần giống nhất...")
+                    char_vectorizer = TfidfVectorizer(analyzer='char_wb', ngram_range=(2, 4))
+                    title_matrix = char_vectorizer.fit_transform(movies_df['title'].str.lower())
+                    query_vec = char_vectorizer.transform([query_clean])
 
-            with cols[i % 5]:
-                st.image(poster_url, use_container_width=True)
-                badges = "".join([f'<span class="genre-tag">{g}</span>' for g in genres_raw])
-                st.markdown(f"""
-                    <h5 style="margin:5px 0; font-size:13px; font-weight:bold; height:35px; overflow:hidden;">{title}</h5>
-                    <div>{badges}</div>
-                    <span style="font-size:12px; color:#00d2d3; font-weight:bold;">🧬 TƯƠNG ĐỒNG LAI: {hybrid_sim[idx] * 100:.1f}%</span>
-                """, unsafe_allow_html=True)
+                    scores = cosine_similarity(query_vec, title_matrix).flatten()
+                    top_indices = np.argsort(scores)[::-1][:top_k]
+
+                    # Lọc bỏ các kết quả có độ tương đồng = 0
+                    valid_top = [idx for idx in top_indices if scores[idx] > 0.05]
+                    results_df = movies_df.iloc[valid_top]
+                else:
+                    results_df = matched_df.head(top_k)
+
+                if results_df.empty:
+                    st.error("❌ Không tìm thấy bộ phim nào phù hợp với tên đã nhập!")
+                else:
+                    st.success(f"🎉 Tìm thấy {len(results_df)} kết quả khớp với từ khóa!")
+                    cols = st.columns(5)
+                    for i, (df_idx, m_info) in enumerate(results_df.iterrows()):
+                        title = m_info['title']
+                        genres_raw = str(m_info['genres']).split('|')
+                        overview_text = str(m_info.get('overview', 'No overview available.'))
+                        poster_url = get_movie_poster(title, m_info.get('poster_url'))
+
+                        with cols[i % 5]:
+                            st.image(poster_url, use_container_width=True)
+                            badges = "".join([f'<span class="genre-tag">{g}</span>' for g in genres_raw])
+                            st.markdown(f"""
+                                <h5 style="margin:5px 0; font-size:13px; font-weight:bold; height:35px; overflow:hidden;">{title}</h5>
+                                <div>{badges}</div>
+                                <div class="overview-text" title="{overview_text}">📖 {overview_text}</div>
+                            """, unsafe_allow_html=True)
 
 # ==============================================================================
 # PHÂN HỆ: ĐỒ THỊ TRI THỨC TƯƠNG TÁC (KNOWLEDGE GRAPH)
@@ -573,7 +590,6 @@ elif app_mode == "🌌 Đồ thị Tri thức (Knowledge Graph)":
                 sims = cosine_similarity(query_dense, movie_embeddings).flatten()
                 top_neighbor_idxs = np.argsort(sims)[::-1][1:num_neighbors + 1]
 
-                # Khởi tạo đồ thị PyVis
                 net = Network(height="600px", width="100%", bgcolor="#050508", font_color="white")
                 net.add_node(root_movie, label=root_movie, color="#E50914", size=25, title="Root Movie")
 
@@ -584,7 +600,6 @@ elif app_mode == "🌌 Đồ thị Tri thức (Knowledge Graph)":
                     net.add_node(m_title, label=m_title, color="#00d2d3", size=15, title=f"Match: {sim_val * 100:.1f}%")
                     net.add_edge(root_movie, m_title, value=float(sim_val), title=f"{sim_val * 100:.1f}% Similarity")
 
-                    # Thêm node thể loại chính
                     primary_genre = str(m_row['genres']).split('|')[0]
                     net.add_node(primary_genre, label=primary_genre, color="#ff9f43", shape="ellipse", size=10)
                     net.add_edge(m_title, primary_genre, color="#333344")
@@ -612,11 +627,11 @@ elif app_mode == "🏷️ Tìm Phim Theo Thể Loại":
     display_df = filtered_df.head(top_k)
 
     cols = st.columns(5)
-    for i, (_, row) in enumerate(display_df.iterrows()):
-        title = row['title']
-        genres_raw = str(row['genres']).split('|')
-        poster_url = get_movie_poster(title, row.get('poster_url'))
-        overview_text = str(row.get('overview', 'No overview available.'))
+    for i, (df_idx, m_info) in enumerate(display_df.iterrows()):
+        title = m_info['title']
+        genres_raw = str(m_info['genres']).split('|')
+        overview_text = str(m_info.get('overview', 'No overview available.'))
+        poster_url = get_movie_poster(title, m_info.get('poster_url'))
 
         with cols[i % 5]:
             st.image(poster_url, use_container_width=True)
@@ -626,33 +641,3 @@ elif app_mode == "🏷️ Tìm Phim Theo Thể Loại":
                 <div>{badges}</div>
                 <div class="overview-text" title="{overview_text}">📖 {overview_text}</div>
             """, unsafe_allow_html=True)
-
-# ==============================================================================
-# PHÂN HỆ: PHÒNG THÍ NGHIỆM HỌC MÁY
-# ==============================================================================
-elif app_mode == "🔬 Phòng Thí Nghiệm Học Máy":
-    st.header("🔬 Phòng Thí Nghiệm & Trực Quan Hóa Không Gian Vector")
-    st.markdown("Giảm chiều dữ liệu Vector NCF (32 chiều) xuống Không gian 2D bằng PCA để phân tích cụm phân bố phim.")
-
-    if st.button("🚀 TRỰC QUAN HÓA BẰNG PCA (2D SPATIAL PROJECTION)"):
-        with st.spinner("Đang tính toán ma trận chiếu PCA..."):
-            model.eval()
-            with torch.no_grad():
-                movie_embeddings = model.movie_embedding.weight.detach().cpu().numpy()
-
-            sample_size = min(1000, len(movies_df))
-            sample_indices = np.random.choice(len(movies_df), sample_size, replace=False)
-            sample_embeddings = movie_embeddings[sample_indices]
-
-            pca = PCA(n_components=2)
-            coords_2d = pca.fit_transform(sample_embeddings)
-
-            pca_df = pd.DataFrame({
-                'X': coords_2d[:, 0],
-                'Y': coords_2d[:, 1],
-                'Title': movies_df.iloc[sample_indices]['title'].values,
-                'Main Genre': movies_df.iloc[sample_indices]['genres'].apply(lambda x: str(x).split('|')[0]).values
-            })
-
-            st.scatter_chart(pca_df, x='X', y='Y', color='Main Genre', size=20)
-            st.success("✅ Đã hoàn tất chiếu không gian Vector nhúng 32D sang 2D!")
