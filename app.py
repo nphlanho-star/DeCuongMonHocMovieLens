@@ -14,7 +14,15 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.decomposition import PCA
 
-# Hỗ trợ mô hình AI Ngữ nghĩa (Sentence Transformers)
+# Hỗ trợ tự động dịch thuật cho câu truy vấn Tiếng Việt
+try:
+    from deep_translator import GoogleTranslator
+
+    HAS_TRANSLATOR = True
+except ImportError:
+    HAS_TRANSLATOR = False
+
+# Hỗ trợ mô hình AI Ngữ nghĩa Đa ngôn ngữ (Sentence Transformers)
 try:
     from sentence_transformers import SentenceTransformer
 
@@ -31,9 +39,9 @@ try:
 except ImportError:
     HAS_PYVIS = False
 
-# ==============================================================================
+
 # CẤU HÌNH TỰ ĐỘNG KÍCH HOẠT HẠ TẦNG STREAMLIT
-# ==============================================================================
+
 if __name__ == '__main__':
     current_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(current_dir)
@@ -44,14 +52,12 @@ if __name__ == '__main__':
         subprocess.run([sys.executable, "-m", "streamlit", "run", __file__])
         sys.exit()
 
-# ==============================================================================
+
 # QUẢN LÝ PHẦN CỨNG VẬT LÝ
-# ==============================================================================
+
 device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
-# ==============================================================================
 # GIAO DIỆN CINEMATIC PREMIUM
-# ==============================================================================
 st.set_page_config(page_title="Netflix Enterprise v6.5 AI Master", page_icon="🍿", layout="wide")
 
 st.markdown("""
@@ -82,9 +88,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ==============================================================================
 # KIẾN TRÚC MẠNG NEURAL NCF
-# ==============================================================================
+
 class NeuralCollaborativeFiltering(nn.Module):
     def __init__(self, num_users=85307, num_movies=10524, embedding_dim=32):
         super(NeuralCollaborativeFiltering, self).__init__()
@@ -111,9 +116,9 @@ def predict_with_custom_user_embed(model, custom_user_embed, movie_indices_tenso
     return model.fc_layers(x).squeeze()
 
 
-# ==============================================================================
+
 # HÀM LẤY ẢNH POSTER VỚI BẢO VỆ DỰ PHÒNG & CACHE
-# ==============================================================================
+
 @st.cache_data(show_spinner=False, ttl=3600)
 def get_movie_poster(movie_title, poster_url_from_df=None):
     fallback_image = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=500&auto=format&fit=crop"
@@ -148,9 +153,9 @@ def get_movie_poster(movie_title, poster_url_from_df=None):
     return fallback_image
 
 
-# ==============================================================================
-# QUẢN LÝ TÀI NGUYÊN & ENGINE NHÚNG AI
-# ==============================================================================
+
+# QUẢN LÝ TÀI NGUYÊN & ENGINE NHÚNG AI ĐA NGÔN NGỮ (ƯU TIÊN ĐỌC VECTOR PRE-COMPUTED)
+
 @st.cache_resource
 def load_resources():
     # 1. Load Model NCF
@@ -166,7 +171,7 @@ def load_resources():
     if 'overview' not in movies_df.columns: movies_df['overview'] = "No overview available."
     if 'poster_url' not in movies_df.columns: movies_df['poster_url'] = ""
 
-    # 3. Khởi tạo TF-IDF cho cốt truyện
+    # 3. Khởi tạo TF-IDF
     tfidf = TfidfVectorizer(stop_words='english', ngram_range=(1, 2))
     enhanced_corpus = (
             movies_df['genres'].str.replace('|', ' ', regex=False) + ' ' +
@@ -175,13 +180,19 @@ def load_resources():
     )
     tfidf_matrix = tfidf.fit_transform(enhanced_corpus)
 
-    # 4. Khởi tạo mô hình Semantic Transformers (SBERT)
+    # 4. Khởi tạo SBERT và Load Vector Pre-computed (.npy)
     sbert_model = None
     overview_embeddings = None
+
     if HAS_SBERT:
-        sbert_model = SentenceTransformer('all-MiniLM-L6-v2')
-        corpus_texts = (movies_df['title'] + ". " + movies_df['overview'].fillna('')).tolist()
-        overview_embeddings = sbert_model.encode(corpus_texts, show_progress_bar=False, convert_to_numpy=True)
+        sbert_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+
+        # Đọc trực tiếp file Vector đã build để tải tức thì
+        if os.path.exists('overview_embeddings.npy'):
+            overview_embeddings = np.load('overview_embeddings.npy')
+        else:
+            corpus_texts = (movies_df['title'] + ". " + movies_df['overview'].fillna('')).tolist()
+            overview_embeddings = sbert_model.encode(corpus_texts, show_progress_bar=False, convert_to_numpy=True)
 
     return model, movies_df, tfidf_matrix, tfidf, sbert_model, overview_embeddings
 
@@ -189,16 +200,14 @@ def load_resources():
 model, movies_df, tfidf_matrix, tfidf_vectorizer, sbert_model, overview_embeddings = load_resources()
 all_genres = sorted(list(set([g for g_list in movies_df['genres'].dropna().str.split('|') for g in g_list])))
 
-# ==============================================================================
 # DASHBOARD CONTROL PANEL
-# ==============================================================================
 st.title("🎬 NETFLIX ENTERPRISE SYSTEMS - V6.5 AI MASTER")
-st.caption("Kiến trúc công nghiệp: Hybrid Sentence-BERT + TF-IDF Keyword Boosting | Neural NCF | Knowledge Graph")
+st.caption("Kiến trúc công nghiệp: Multilingual SBERT + Auto Translation | Hybrid Search | NCF | Knowledge Graph")
 
 m_col1, m_col2, m_col3, m_col4 = st.columns(4)
 with m_col1: st.metric(label="🖥️ Thiết bị tính toán", value=str(device).upper())
 with m_col2: st.metric(label="📊 Chiều Vector NCF", value="32-Dimensions")
-with m_col3: st.metric(label="🧠 Động cơ Semantic", value="Hybrid SBERT Active" if HAS_SBERT else "TF-IDF Mode")
+with m_col3: st.metric(label="🧠 Dịch tự động (Translator)", value="Active" if HAS_TRANSLATOR else "Inactive")
 with m_col4: st.metric(label="🔬 Đồ thị không gian", value="PyVis Enabled" if HAS_PYVIS else "Disabled")
 
 st.markdown("---")
@@ -206,9 +215,7 @@ st.markdown("---")
 if "user_ratings" not in st.session_state:
     st.session_state.user_ratings = {}
 
-# ==============================================================================
 # BỘ ĐIỀU PHỐI TẠI THANH SIDEBAR
-# ==============================================================================
 with st.sidebar:
     st.header("⚙️ CHẾ ĐỘ ENGINE GỢI Ý")
     app_mode = st.sidebar.radio(
@@ -232,17 +239,15 @@ with st.sidebar:
     else:
         st.warning("⚠️ Đang dùng `movies_mapped.csv` gốc.")
 
-# ==============================================================================
-# PHÂN HỆ: TÌM PHIM BẰNG MÔ TẢ CỐT TRUYỆN
-# ==============================================================================
+# PHÂN HỆ: TÌM PHIM BẰNG MÔ TẢ CỐT TRUYỆN (HỖ TRỢ TỰ ĐỘNG DỊCH TIẾNG VIỆT)
 if app_mode == "🤖 Tìm Phim Qua Mô Tả Cốt Truyện (Semantic AI)":
-    st.header("🤖 Pure Plot Semantic Search (Tìm Phim Qua Mô Tả Cốt Truyện Thuần Túy)")
+    st.header("🤖 Multilingual Plot Semantic Search (Tìm Phim Qua Mô Tả Tiếng Việt / Tiếng Anh)")
     st.markdown(
-        "💡 **Kiến trúc tối ưu:** Ưu tiên **80% Vector Ngữ Nghĩa SBERT** cho cốt truyện, hỗ trợ **15% TF-IDF** và **5% Keyword Boost**.")
+        "💡 **Tự động dịch thuật AI:** Hệ thống phát hiện câu tiếng Việt và tự động chuyển ngữ sang tiếng Anh để kích hoạt trọn vẹn **Hybrid Pipeline (SBERT + TF-IDF + Keyword Boost)** cho kết quả đồng nhất và chính xác nhất.")
 
     plot_query = st.text_area(
         "📝 Nhập câu mô tả nội dung, bối cảnh, nhân vật hoặc diễn biến phim bạn muốn tìm:",
-        placeholder="Ví dụ: A young wizard boy attends a magical school, makes friends, and faces dark forces...",
+        placeholder="Ví dụ (Tiếng Việt): Một cậu bé phù thủy vô tình tham gia cuộc thi nguy hiểm với rồng và mê cung ma quái...\nHoặc (Tiếng Anh): A young wizard boy attends a magical school and faces dark forces...",
         height=110
     )
 
@@ -250,19 +255,40 @@ if app_mode == "🤖 Tìm Phim Qua Mô Tả Cốt Truyện (Semantic AI)":
         if not plot_query.strip():
             st.error("Vui lòng nhập nội dung mô tả bộ phim!")
         else:
-            with st.spinner("🧠 AI đang phân tích ma trận ngữ nghĩa cốt truyện..."):
+            with st.spinner("🧠 AI đang phân tích ngữ nghĩa cốt truyện..."):
                 start_perf = time.perf_counter()
 
+                # 1. Phát hiện tiếng Việt và tự động dịch sang tiếng Anh
+                is_vietnamese = bool(re.search(r'[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]',
+                                               plot_query.lower()))
+
+                search_query_en = plot_query
+                if is_vietnamese:
+                    if HAS_TRANSLATOR:
+                        try:
+                            search_query_en = GoogleTranslator(source='auto', target='en').translate(plot_query)
+                            st.info(
+                                f"🌐 **AI đã dịch câu truy vấn sang Tiếng Anh để tối ưu kết quả:** `{search_query_en}`")
+                        except Exception:
+                            st.warning(
+                                "⚠️ Không thể kết nối dịch tự động. Đang chuyển sang chế độ Vector Đa Ngôn Ngữ...")
+                    else:
+                        st.warning(
+                            "⚠️ Thư viện `deep-translator` chưa được cài đặt. Đang tìm qua Vector Đa Ngôn Ngữ trực tiếp...")
+
+                # 2. Vector Dense Score (SBERT)
                 if HAS_SBERT and overview_embeddings is not None:
-                    query_vec = sbert_model.encode([plot_query], convert_to_numpy=True)
+                    query_vec = sbert_model.encode([search_query_en], convert_to_numpy=True)
                     dense_scores = cosine_similarity(query_vec, overview_embeddings).flatten()
                 else:
                     dense_scores = np.zeros(len(movies_df))
 
-                tfidf_query = tfidf_vectorizer.transform([plot_query])
+                # 3. Vector Sparse Score (TF-IDF)
+                tfidf_query = tfidf_vectorizer.transform([search_query_en])
                 sparse_scores = cosine_similarity(tfidf_query, tfidf_matrix).flatten()
 
-                words = re.findall(r'\b[a-zA-Z]{3,}\b', plot_query.lower())
+                # 4. Keyword Boost
+                words = re.findall(r'\b[a-zA-Z]{3,}\b', search_query_en.lower())
                 stopwords = {'this', 'film', 'series', 'set', 'and', 'follows', 'the', 'for', 'with', 'one', 'most',
                              'all', 'time', 'about', 'from', 'that', 'they', 'them', 'their', 'movie', 'story'}
                 keywords = [w for w in words if w not in stopwords]
@@ -277,6 +303,7 @@ if app_mode == "🤖 Tìm Phim Qua Mô Tả Cốt Truyện (Semantic AI)":
                     if max_b > 0:
                         boost_scores = boost_scores / max_b
 
+                # 5. Tổng hợp điểm Hybrid cho mọi ngôn ngữ
                 if HAS_SBERT and overview_embeddings is not None:
                     final_scores = (0.80 * dense_scores) + (0.15 * sparse_scores) + (0.05 * boost_scores)
                 else:
@@ -307,9 +334,7 @@ if app_mode == "🤖 Tìm Phim Qua Mô Tả Cốt Truyện (Semantic AI)":
                             <div class="overview-text" title="{overview_text}">📖 {overview_text}</div>
                         """, unsafe_allow_html=True)
 
-# ==============================================================================
 # PHÂN HỆ: PHA CHẾ ĐIỆN ẢNH AI (CINEMATIC ALCHEMIST)
-# ==============================================================================
 elif app_mode == "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)":
     st.header("🧪 Cinematic Alchemist Engine (Thuật Toán Pha Chế Điện Ảnh)")
     st.markdown("💡 **Cơ sở khoa học:** Trích xuất Vector Nhúng 32 chiều và thực hiện phép toán nội suy tuyến tính.")
@@ -411,9 +436,7 @@ elif app_mode == "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)":
                             <span style="font-size:12px; color:#E50914; font-weight:bold;">🧪 ĐỘ HÒA HỢP: {match_percent:.1f}%</span>
                         """, unsafe_allow_html=True)
 
-# ==============================================================================
 # PHÂN HỆ: CÁ NHÂN HÓA AI (NCF)
-# ==============================================================================
 elif app_mode == "👤 Cá nhân hóa AI (NCF)":
     st.header("🎯 Gợi ý cá nhân hóa Deep Learning (Bayesian NCF)")
     cold_start_mode = st.checkbox("🆕 Tôi là người dùng mới (Giả lập Khởi động lạnh - Cold Start)")
@@ -507,9 +530,7 @@ elif app_mode == "👤 Cá nhân hóa AI (NCF)":
                                 <div style="margin-top:4px;"><span class="badge-xai">🧬 Hợp gu: {alignment_percent:.1f}%</span></div>
                             """, unsafe_allow_html=True)
 
-# ==============================================================================
-# PHÂN HỆ: TÌM PHIM THEO TÊN / TỪ KHÓA TRỰC TIẾP (ĐÃ ĐƯỢC SỬA)
-# ==============================================================================
+# PHÂN HỆ: TÌM PHIM THEO TÊN / TỪ KHÓA TRỰC TIẾP
 elif app_mode == "🔍 Tìm Phim Qua Từ Khóa/Tên Phim":
     st.header("🔍 Tìm Phim Trực Tiếp Theo Tên Phim / Từ Khóa")
     st.markdown(
@@ -527,10 +548,8 @@ elif app_mode == "🔍 Tìm Phim Qua Từ Khóa/Tên Phim":
             with st.spinner("🔍 Đang tra cứu danh mục phim..."):
                 query_clean = search_query.strip().lower()
 
-                # 1. Khớp từ khóa trực tiếp trên tiêu đề tên phim
                 matched_df = movies_df[movies_df['title'].str.lower().str.contains(query_clean, regex=False)].copy()
 
-                # 2. Dự phòng: Nếu không tìm thấy chính xác, gợi ý các tên phim có nét tương đồng nhất (Character N-gram TF-IDF)
                 if matched_df.empty:
                     st.warning("⚠️ Không tìm thấy tên phim khớp hoàn toàn. Đang tìm các tiêu đề gần giống nhất...")
                     char_vectorizer = TfidfVectorizer(analyzer='char_wb', ngram_range=(2, 4))
@@ -540,7 +559,6 @@ elif app_mode == "🔍 Tìm Phim Qua Từ Khóa/Tên Phim":
                     scores = cosine_similarity(query_vec, title_matrix).flatten()
                     top_indices = np.argsort(scores)[::-1][:top_k]
 
-                    # Lọc bỏ các kết quả có độ tương đồng = 0
                     valid_top = [idx for idx in top_indices if scores[idx] > 0.05]
                     results_df = movies_df.iloc[valid_top]
                 else:
@@ -565,10 +583,7 @@ elif app_mode == "🔍 Tìm Phim Qua Từ Khóa/Tên Phim":
                                 <div>{badges}</div>
                                 <div class="overview-text" title="{overview_text}">📖 {overview_text}</div>
                             """, unsafe_allow_html=True)
-
-# ==============================================================================
 # PHÂN HỆ: ĐỒ THỊ TRI THỨC TƯƠNG TÁC (KNOWLEDGE GRAPH)
-# ==============================================================================
 elif app_mode == "🌌 Đồ thị Tri thức (Knowledge Graph)":
     st.header("🌌 Neural Knowledge Graph - Vũ trụ Điện ảnh 2D/3D")
 
@@ -609,10 +624,7 @@ elif app_mode == "🌌 Đồ thị Tri thức (Knowledge Graph)":
                 with open(graph_path, "r", encoding="utf-8") as f:
                     html_content = f.read()
                 components.html(html_content, height=620, scrolling=False)
-
-# ==============================================================================
 # PHÂN HỆ: TÌM PHIM THEO THỂ LOẠI
-# ==============================================================================
 elif app_mode == "🏷️ Tìm Phim Theo Thể Loại":
     st.header("🏷️ Khám Phá Điện Ảnh Theo Thể Loại")
     selected_g = st.selectbox("Chọn thể loại phim:", all_genres)
