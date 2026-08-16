@@ -41,7 +41,7 @@ except ImportError:
     HAS_PYVIS = False
 
 # ---------------------------------------------------------
-# CẤU HINH TỰ ĐỘNG KÍCH HOẠT HẠ TẦNG STREAMLIT
+# CẤU HÌNH TỰ ĐỘNG KÍCH HOẠT HẠ TẦNG STREAMLIT
 # ---------------------------------------------------------
 if __name__ == '__main__' and os.environ.get("IS_STREAMLIT_RUNNING") != "1":
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -134,7 +134,7 @@ FALLBACK_IMAGE = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q
 
 
 def normalize_title(title):
-    """Chuẩn hóa tên phim triệt để để đối sánh chính xác 100%"""
+    """Chuẩn hóa tên phim để đối sánh và lọc trùng tuyệt đối"""
     if not isinstance(title, str): return ""
     t = re.sub(r'\s*\(\d{4}\)', '', title).lower().strip()
     t = re.sub(r'[^a-z0-9]', '', t)
@@ -203,7 +203,7 @@ def get_movie_trailer_url(movie_title):
 
 
 # ---------------------------------------------------------
-# TẢI TÀI NGUYÊN HỆ THỐNG
+# TẢI TÀI NGUYÊN HỆ THỐNG & PRE-COMPUTE TỐI ƯU
 # ---------------------------------------------------------
 @st.cache_resource
 def load_resources():
@@ -213,8 +213,10 @@ def load_resources():
     if 'overview' not in movies_df.columns: movies_df['overview'] = "No overview available."
     if 'poster_url' not in movies_df.columns: movies_df['poster_url'] = ""
 
-    # Tạo cột title chuẩn hóa để lọc cực nhanh
     movies_df['norm_title'] = movies_df['title'].apply(normalize_title)
+    movies_df['title_lower'] = movies_df['title'].fillna('').str.lower()
+    movies_df['genres_list'] = movies_df['genres'].fillna('').apply(lambda x: [g for g in str(x).split('|') if g])
+    movies_df['overview_str'] = movies_df['overview'].fillna('No overview available.')
 
     num_movies = len(movies_df)
     model = NeuralCollaborativeFiltering(num_movies=num_movies)
@@ -253,16 +255,19 @@ def load_resources():
 
 
 model, movies_df, tfidf_matrix, tfidf_vectorizer, sbert_model, overview_embeddings, HAS_SBERT = load_resources()
-all_genres = sorted(list(set([g for g_list in movies_df['genres'].dropna().str.split('|') for g in g_list if g])))
+all_genres = sorted(list(set([g for g_list in movies_df['genres_list'] for g in g_list if g])))
 
 # ---------------------------------------------------------
-# KHO LƯU TRỮ PHÂN THEO USER ID
+# KHO LƯU TRỮ PHÂN THEO USER ID & ACTIVE LEARNING
 # ---------------------------------------------------------
 if "user_store" not in st.session_state:
     st.session_state.user_store = {}
 
 if "current_user_id" not in st.session_state:
     st.session_state.current_user_id = 80000
+
+if "user_ratings" not in st.session_state:
+    st.session_state.user_ratings = {}
 
 if "recommendations" not in st.session_state: st.session_state.recommendations = None
 if "active_trailer" not in st.session_state: st.session_state.active_trailer = None
@@ -275,7 +280,7 @@ def get_current_user_data(uid):
 
 
 def get_excluded_norm_titles(user_id):
-    """Lấy danh sách các norm_title đã xem hoặc lưu để loại trừ"""
+    """Lấy danh sách các norm_title đã xem hoặc lưu để loại trừ chống hiển thị trùng"""
     u_data = get_current_user_data(user_id)
     raw_list = u_data["watchlist"] + u_data["history"]
     return set([normalize_title(t) for t in raw_list if t])
@@ -308,7 +313,7 @@ def get_dynamic_user_embedding(model, user_id, movies_df, user_history_and_watch
 
 
 # ---------------------------------------------------------
-# KHUNG RENDER CARD PHIM CHUẨN CINEMATIC
+# KHUNG RENDER CARD PHIM CHUẨN CINEMATIC (CÓ ACTIVE LEARNING)
 # ---------------------------------------------------------
 def render_movie_card(col, title, genres_raw, overview_text, poster_url, extra_info_html="", key_prefix="card"):
     cur_uid = st.session_state.current_user_id
@@ -330,6 +335,15 @@ def render_movie_card(col, title, genres_raw, overview_text, poster_url, extra_i
 
         clean_key = re.sub(r'[^a-zA-Z0-9_]', '_', title)
         card_id = f"{key_prefix}_{clean_key}"
+
+        rating_key = f"rate_{card_id}"
+        cur_rating = st.session_state.user_ratings.get(title, 0)
+        rating = st.selectbox("⭐ Active Learning", [0, 1, 2, 3, 4, 5], index=cur_rating, key=rating_key,
+                              help="Đánh giá để huấn luyện mô hình")
+        if rating != cur_rating:
+            st.session_state.user_ratings[title] = rating
+            if rating >= 4 and title not in u_data["history"]:
+                u_data["history"].append(title)
 
         btn_c1, btn_c2 = st.columns([1, 1])
         with btn_c1:
@@ -365,7 +379,8 @@ def render_movie_card(col, title, genres_raw, overview_text, poster_url, extra_i
 # BẢNG THÔNG TIN ĐIỀU HÀNH
 # ---------------------------------------------------------
 st.title("🎬 NETFLIX ENTERPRISE SYSTEMS - V6.5 AI MASTER")
-st.caption("Kiến trúc công nghiệp: Multilingual SBERT + Auto Translation | Dynamic User Vector | NCF | Knowledge Graph")
+st.caption(
+    "Kiến trúc công nghiệp: Multilingual SBERT + Auto Translation | Dynamic User Vector | NCF | Knowledge Graph | ML Lab")
 
 m_col1, m_col2, m_col3, m_col4 = st.columns(4)
 with m_col1: st.metric(label="🖥️ Thiết bị tính toán", value=str(device).upper())
@@ -388,11 +403,12 @@ with st.sidebar:
             "👤 Cá nhân hóa AI (NCF)",
             "🔍 Tìm Phim Qua Từ Khóa/Tên Phim",
             "🌌 Đồ thị Tri thức (Knowledge Graph)",
+            "🔬 Phòng Thí Nghiệm Học Máy (ML Lab & Active Learning)",
             "🏷️ Tìm Phim Theo Thể Loại"
         ]
     )
     st.markdown("---")
-    top_k = st.slider("🍿 Số lượng phim hiển thị (Top K):", min_value=5, max_value=20, value=10)
+    top_k = st.slider("🍿 Số lượng phim hiển thị (Top K):", min_value=5, max_value=40, value=10)
 
     st.markdown("---")
     st.subheader("👤 QUẢN LÝ TÀI KHOẢN & VÙNG DỮ LIỆU")
@@ -439,7 +455,7 @@ if app_mode == "🤖 Tìm Phim Qua Mô Tả Cốt Truyện (Semantic AI)":
 
     plot_query = st.text_area(
         "📝 Nhập câu mô tả nội dung, bối cảnh, nhân vật hoặc diễn biến phim bạn muốn tìm:",
-        placeholder="Ví dụ: Một cậu bé phù thủy vô tình tham gia cuộc thi nguy hiểm với rồng...",
+        placeholder="Ví dụ: Một cậu bé phù thủy vô tinh tham gia cuộc thi nguy hiểm với rồng...",
         height=110
     )
 
@@ -476,29 +492,32 @@ if app_mode == "🤖 Tìm Phim Qua Mô Tả Cốt Truyện (Semantic AI)":
                 boost_scores = np.zeros(len(movies_df))
                 if keywords:
                     for kw in keywords:
-                        title_match = movies_df['title'].str.lower().str.contains(kw, regex=False).fillna(False)
+                        title_match = movies_df['title_lower'].str.contains(kw, regex=False).values
                         boost_scores += (title_match.astype(float) * 0.1)
                     max_b = np.max(boost_scores)
                     if max_b > 0: boost_scores = boost_scores / max_b
 
                 final_scores = (0.70 * dense_scores) + (0.20 * sparse_scores) + (0.10 * boost_scores)
 
-                # Lọc danh sách phim đã tương tác (dùng norm_title)
                 exclude_norm_titles = get_excluded_norm_titles(st.session_state.current_user_id)
                 top_indices = np.argsort(final_scores)[::-1]
 
                 recs = []
+                seen_in_session = set(exclude_norm_titles)
+
                 for idx in top_indices:
                     m_info = movies_df.iloc[idx]
-                    if m_info['norm_title'] in exclude_norm_titles:
+                    norm_t = m_info['norm_title']
+                    if norm_t in seen_in_session:
                         continue
 
+                    seen_in_session.add(norm_t)
                     match_score = min(99.9, max(50.0, final_scores[idx] * 100))
                     extra_html = f'<div style="margin-bottom:6px;"><span style="font-size:12px; color:#2ed573; font-weight:bold;">🎯 ĐỘ KHỚP HYBRID: {match_score:.1f}%</span></div>'
                     recs.append({
                         'title': m_info['title'],
-                        'genres_raw': str(m_info['genres']).split('|'),
-                        'overview_text': str(m_info.get('overview', 'No overview available.')),
+                        'genres_raw': m_info['genres_list'],
+                        'overview_text': m_info['overview_str'],
                         'poster_url': get_movie_poster(m_info['title'], m_info.get('poster_url')),
                         'extra_html': extra_html
                     })
@@ -548,15 +567,18 @@ elif app_mode == "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)":
                 vec_blended = (w_a * vec_a) + ((1.0 - w_a) * vec_b)
                 blended_sims = cosine_similarity(vec_blended.reshape(1, -1), movie_embeddings).flatten()
 
-                # Bỏ qua các phim đã tương tác (Chuẩn hóa)
                 exclude_norm_titles = get_excluded_norm_titles(st.session_state.current_user_id)
                 exclude_norm_titles.add(normalize_title(movie_a_title))
                 exclude_norm_titles.add(normalize_title(movie_b_title))
 
                 sorted_idxs = np.argsort(blended_sims)[::-1]
+                seen_in_session = set(exclude_norm_titles)
+
                 valid_recs = []
                 for i in sorted_idxs:
-                    if movies_df.iloc[i]['norm_title'] not in exclude_norm_titles:
+                    norm_t = movies_df.iloc[i]['norm_title']
+                    if norm_t not in seen_in_session:
+                        seen_in_session.add(norm_t)
                         valid_recs.append(i)
                     if len(valid_recs) == top_k:
                         break
@@ -569,8 +591,8 @@ elif app_mode == "🧪 Pha Chế Điện Ảnh (Cinematic Alchemist)":
                     extra_html = f'<div style="margin-bottom:6px;"><span style="font-size:12px; color:#E50914; font-weight:bold;">🧪 ĐỘ HÒA HỢP: {match_percent:.1f}%</span></div>'
                     recs.append({
                         'title': m_info['title'],
-                        'genres_raw': str(m_info['genres']).split('|'),
-                        'overview_text': str(m_info.get('overview', 'No overview available.')),
+                        'genres_raw': m_info['genres_list'],
+                        'overview_text': m_info['overview_str'],
                         'poster_url': get_movie_poster(m_info['title'], m_info.get('poster_url')),
                         'extra_html': extra_html
                     })
@@ -608,17 +630,18 @@ elif app_mode == "👤 Cá nhân hóa AI (NCF)":
 
             all_indices = np.argsort(scores)[::-1]
             exclude_norm_titles = get_excluded_norm_titles(cur_uid) if filter_watched else set()
+            seen_in_session = set(exclude_norm_titles)
 
             valid_indices = []
             for idx in all_indices:
                 m_info = movies_df.iloc[idx]
+                norm_t = m_info['norm_title']
 
-                # Bỏ qua nếu norm_title khớp
-                if filter_watched and m_info['norm_title'] in exclude_norm_titles:
+                if filter_watched and norm_t in seen_in_session:
                     continue
 
-                m_genres = str(m_info['genres']).split('|')
-                if selected_genre == "Tất cả thể loại" or selected_genre in m_genres:
+                if selected_genre == "Tất cả thể loại" or selected_genre in m_info['genres_list']:
+                    seen_in_session.add(norm_t)
                     valid_indices.append(idx)
 
                 if len(valid_indices) == top_k:
@@ -632,8 +655,8 @@ elif app_mode == "👤 Cá nhân hóa AI (NCF)":
                 extra_html = f'<div style="margin-bottom:4px;"><span style="font-size:12px; color:#E50914; font-weight:bold;">🔥 MATCH NCF: {scores[idx] * 100:.1f}%</span></div>'
                 recs.append({
                     'title': m_info['title'],
-                    'genres_raw': str(m_info['genres']).split('|'),
-                    'overview_text': str(m_info.get('overview', 'No overview available.')),
+                    'genres_raw': m_info['genres_list'],
+                    'overview_text': m_info['overview_str'],
                     'poster_url': get_movie_poster(m_info['title'], m_info.get('poster_url')),
                     'extra_html': extra_html
                 })
@@ -654,17 +677,24 @@ elif app_mode == "🔍 Tìm Phim Qua Từ Khóa/Tên Phim":
     if st.button("🔍 TÌM KIẾM PHIM"):
         if search_query.strip():
             query_clean = search_query.strip().lower()
-            matched_df = movies_df[movies_df['title'].str.lower().str.contains(query_clean, regex=False)].head(top_k)
+            matched_df = movies_df[movies_df['title_lower'].str.contains(query_clean, regex=False)]
 
             recs = []
+            seen_in_session = set()
             for _, m_info in matched_df.iterrows():
+                norm_t = m_info['norm_title']
+                if norm_t in seen_in_session:
+                    continue
+                seen_in_session.add(norm_t)
                 recs.append({
                     'title': m_info['title'],
-                    'genres_raw': str(m_info['genres']).split('|'),
-                    'overview_text': str(m_info.get('overview', 'No overview available.')),
+                    'genres_raw': m_info['genres_list'],
+                    'overview_text': m_info['overview_str'],
                     'poster_url': get_movie_poster(m_info['title'], m_info.get('poster_url')),
                     'extra_html': ''
                 })
+                if len(recs) == top_k:
+                    break
             st.session_state.recommendations = {'mode': 'search', 'recs': recs}
 
     if st.session_state.recommendations and st.session_state.recommendations.get('mode') == 'search':
@@ -694,34 +724,107 @@ elif app_mode == "🌌 Đồ thị Tri thức (Knowledge Graph)":
             net = Network(height="600px", width="100%", bgcolor="#050508", font_color="white")
             net.add_node(root_movie, label=root_movie, color="#E50914", size=25)
 
+            seen_nodes = {normalize_title(root_movie)}
             for n_idx in top_neighbor_idxs:
                 m_row = movies_df.iloc[n_idx]
                 m_title = m_row['title']
-                sim_val = sims[n_idx]
-                net.add_node(m_title, label=m_title, color="#00d2d3", size=15)
-                net.add_edge(root_movie, m_title, value=float(sim_val))
+                norm_t = m_row['norm_title']
 
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as tmp:
-                net.save_graph(tmp.name)
-                with open(tmp.name, "r", encoding="utf-8") as f:
-                    html_content = f.read()
+                if norm_t not in seen_nodes:
+                    seen_nodes.add(norm_t)
+                    sim_val = sims[n_idx]
+                    net.add_node(m_title, label=m_title, color="#00d2d3", size=15)
+                    net.add_edge(root_movie, m_title, value=float(sim_val))
+
+            html_content = net.generate_html()
             components.html(html_content, height=620, scrolling=False)
+
+elif app_mode == "🔬 Phòng Thí Nghiệm Học Máy (ML Lab & Active Learning)":
+    st.header("🔬 ML Lab & Active Learning Studio")
+    st.caption("Huấn luyện On-the-fly mạng NCF dựa trên phản hồi đánh giá thực tế của người dùng.")
+
+    col_lab1, col_lab2 = st.columns(2)
+    with col_lab1:
+        optimizer_name = st.selectbox("⚙️ Thuật toán tối ưu (Optimizer):", ["Adam", "AdamW", "SGD"])
+        learning_rate = st.select_slider("⚡ Learning Rate:", options=[0.0001, 0.001, 0.005, 0.01], value=0.001)
+    with col_lab2:
+        epochs = st.slider("🔄 Số lượng Epochs:", 1, 10, 3)
+        st.markdown(
+            f"📊 **Dữ liệu đánh giá người dùng (Active Feedback):** {len(st.session_state.user_ratings)} bộ phim")
+
+    if st.button("🚀 KHỞI CHẠY TIẾN TRÌNH HUẤN LUYỆN REAL-TIME"):
+        if not st.session_state.user_ratings:
+            st.warning("Vui lòng đánh giá (⭐ 1-5 Sao) ít nhất 1 bộ phim trong các tab gợi ý trước khi huấn luyện!")
+        else:
+            model.train()
+            if optimizer_name == "Adam":
+                optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+            elif optimizer_name == "AdamW":
+                optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+            else:
+                optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+
+            criterion = nn.BCELoss()
+            loss_history = []
+
+            rated_titles = list(st.session_state.user_ratings.keys())
+            rated_indices = movies_df[movies_df['title'].isin(rated_titles)].index.tolist()
+            user_idx_tensor = torch.tensor([st.session_state.current_user_id] * len(rated_indices),
+                                           dtype=torch.long).to(device)
+            movie_idx_tensor = torch.tensor(rated_indices, dtype=torch.long).to(device)
+            labels = torch.tensor(
+                [st.session_state.user_ratings[movies_df.iloc[idx]['title']] / 5.0 for idx in rated_indices],
+                dtype=torch.float32).to(device)
+
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            for ep in range(epochs):
+                optimizer.zero_grad()
+                preds = model(user_idx_tensor, movie_idx_tensor)
+                loss = criterion(preds, labels)
+                loss.backward()
+                optimizer.step()
+
+                loss_val = loss.item()
+                loss_history.append(loss_val)
+                progress_bar.progress((ep + 1) / epochs)
+                status_text.text(f"Epoch {ep + 1}/{epochs} - Loss: {loss_val:.4f}")
+                time.sleep(0.1)
+
+            st.success("✅ Huấn luyện hoàn tất! Trực quan hóa giá trị Loss (Gradient Descent):")
+            st.line_chart(pd.DataFrame({"Loss": loss_history}))
 
 elif app_mode == "🏷️ Tìm Phim Theo Thể Loại":
     st.header("🏷️ Khám Phá Điện Ảnh Theo Thể Loại")
-    selected_g = st.selectbox("Chọn thể loại phim:", all_genres)
 
-    # Bỏ qua các phim đã nằm trong Watchlist/History của User
+    col_g1, col_g2 = st.columns([3, 1])
+    with col_g1:
+        selected_genres = st.multiselect("Chọn thể loại phim:", all_genres,
+                                         default=[all_genres[0]] if all_genres else [])
+    with col_g2:
+        filter_logic = st.radio("Logic tìm kiếm:", ["HOẶC (OR)", "VÀ (AND)"])
+
     exclude_norm_titles = get_excluded_norm_titles(st.session_state.current_user_id)
+    seen_in_session = set(exclude_norm_titles)
 
     filtered_indices = []
-    for idx, row in movies_df.iterrows():
-        if row['norm_title'] in exclude_norm_titles:
-            continue
-        if selected_g in str(row['genres']).split('|'):
-            filtered_indices.append(idx)
-        if len(filtered_indices) == top_k:
-            break
+    if selected_genres:
+        for idx, row in movies_df.iterrows():
+            norm_t = row['norm_title']
+            if norm_t in seen_in_session:
+                continue
+
+            row_genres = row['genres_list']
+            match = any(g in row_genres for g in selected_genres) if filter_logic == "HOẶC (OR)" else all(
+                g in row_genres for g in selected_genres)
+
+            if match:
+                seen_in_session.add(norm_t)
+                filtered_indices.append(idx)
+
+            if len(filtered_indices) == top_k:
+                break
 
     cols = st.columns(5)
     for i, idx in enumerate(filtered_indices):
@@ -729,8 +832,8 @@ elif app_mode == "🏷️ Tìm Phim Theo Thể Loại":
         render_movie_card(
             cols[i % 5],
             m_info['title'],
-            str(m_info['genres']).split('|'),
-            str(m_info.get('overview', 'No overview available.')),
+            m_info['genres_list'],
+            m_info['overview_str'],
             get_movie_poster(m_info['title'], m_info.get('poster_url')),
             key_prefix="genre"
         )
