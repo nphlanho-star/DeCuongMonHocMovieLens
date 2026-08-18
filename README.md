@@ -83,7 +83,7 @@ Dự án sử dụng bộ dữ liệu chuẩn **MovieLens (100K / 1M)** phát h�
 
 <a id="cau-truc"></a>
 ## 5. 📁 Cấu Trúc Thư Mục Dự Án
-
+```text
 DeCuongMonHocMovieLens/
 │
 ├── data/                       # Dữ liệu dự án
@@ -107,7 +107,7 @@ DeCuongMonHocMovieLens/
 ├── requirements.txt            # Danh sách thư viện cần cài đặt
 ├── .gitignore                  # Bỏ qua các file rác / bytecode
 └── README.md                   # Tài liệu hướng dẫn chi tiết dự án
-
+```
 ---
 
 <a id="thuat-toan"></a>
