@@ -4,7 +4,6 @@
 [![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white)](https://streamlit.io/)
 [![Scikit-Learn](https://img.shields.io/badge/Scikit_Learn-F7931E?style=for-the-badge&logo=scikit-learn&logoColor=white)](https://scikit-learn.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)](https://pytorch.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 
 > **Đề cương Môn học / Đồ án Chuyên ngành:** Nghiên cứu, thiết kế và phát triển Hệ thống Gợi ý Phim thông minh dựa trên kỹ thuật **Lọc theo nội dung (Content-Based Filtering)**, **Lọc cộng tác (Collaborative Filtering)** và **Phân rã ma trận (Matrix Factorization - SVD)** trên tập dữ liệu chuẩn **MovieLens**.
 
@@ -12,20 +11,19 @@
 
 ## 📋 Mục Lục
 
-1. [📌 Giới Thiệu & Tính Năng Nổi Bật](#1-giới-thiệu--tính-năng-nổi-bật)
-2. [🏗️ Kiến Trúc Hệ Thống & Luồng Xử Lý](#2-kiến-trúc-hệ-thống--luồng-xử-lý)
-3. [📊 Bộ Dữ Liệu Sử Dụng (MovieLens)](#3-bộ-dữ-liệu-sử-dụng-movielens)
-4. [🛠️ Công Nghệ & Thư Viện Sử Dụng](#4-công-nghệ--thư-viện-sử-dụng)
-5. [📁 Cấu Trúc Thư Mục Dự Án](#5-cấu-trúc-thư-mục-dự-án)
-6. [⚙️ Thuật Toán & Phương Pháp Chi Tiết](#6-thuật-toán--phương-pháp-chi-tiết)
-7. [🚀 Hướng Dẫn Cài Đặt & Vận Hành](#7-hướng-dẫn-cài-đặt--vận-hành)
-8. [📈 Đánh Giá Hiệu Năng Mô Hình](#8-đánh-giá-hiệu-năng-mô-hình)
-9. [🗺️ Định Hướng Phát Triển](#9-định-hướng-phát-triển)
-10. [👥 Thành Viên Thực Hiện](#10-thành-viên-thực-hiện)
-11. [📄 Giấy Phép](#11-giấy-phép)
+1. [📌 Giới Thiệu & Tính Năng Nổi Bật](#gioi-thieu)
+2. [🏗️ Kiến Trúc Hệ Thống & Luồng Xử Lý](#kien-truc)
+3. [📊 Bộ Dữ Liệu Sử Dụng (MovieLens)](#du-lieu)
+4. [🛠️ Công Nghệ & Thư Viện Sử Dụng](#cong-nghe)
+5. [📁 Cấu Trúc Thư Mục Dự Án](#cau-truc)
+6. [⚙️ Thuật Toán & Phương Pháp Chi Tiết](#thuat-toan)
+7. [🚀 Hướng Dẫn Cài Đặt & Vận Hành](#cai-dat)
+8. [📈 Đánh Giá Hiệu Năng Mô Hình](#danh-gia)
+9. [🗺️ Định Hướng Phát Triển](#dinh-huong)
 
 ---
 
+<a id="gioi-thieu"></a>
 ## 1. 📌 Giới Thiệu & Tính Năng Nổi Bật
 
 Trong kỉ nguyên bùng nổ nội dung số, bài toán **Cold Start** và **Information Overload** khiến người dùng tốn nhiều thời gian chọn lựa nội dung phù hợp. Dự án xây dựng một giải pháp gợi ý phim đa tầng:
@@ -37,6 +35,7 @@ Trong kỉ nguyên bùng nổ nội dung số, bài toán **Cold Start** và **I
 
 ---
 
+<a id="kien-truc"></a>
 ## 2. 🏗️ Kiến Trúc Hệ Thống & Luồng Xử Lý
 
 ```text
@@ -54,6 +53,7 @@ Trong kỉ nguyên bùng nổ nội dung số, bài toán **Cold Start** và **I
 
 ---
 
+<a id="du-lieu"></a>
 ## 3. 📊 Bộ Dữ Liệu Sử Dụng (MovieLens)
 
 Dự án sử dụng bộ dữ liệu chuẩn **MovieLens (100K / 1M)** phát hành bởi GroupLens Research:
@@ -67,6 +67,7 @@ Dự án sử dụng bộ dữ liệu chuẩn **MovieLens (100K / 1M)** phát h�
 
 ---
 
+<a id="cong-nghe"></a>
 ## 4. 🛠️ Công Nghệ & Thư Viện Sử Dụng
 
 - **Ngôn ngữ lập trình:** `Python 3.8+`
@@ -80,6 +81,7 @@ Dự án sử dụng bộ dữ liệu chuẩn **MovieLens (100K / 1M)** phát h�
 
 ---
 
+<a id="cau-truc"></a>
 ## 5. 📁 Cấu Trúc Thư Mục Dự Án
 
 DeCuongMonHocMovieLens/
@@ -108,6 +110,7 @@ DeCuongMonHocMovieLens/
 
 ---
 
+<a id="thuat-toan"></a>
 ## 6. ⚙️ Thuật Toán & Phương Pháp Chi Tiết
 
 ### 6.1. Content-Based Filtering (Gợi Ý Theo Nội Dung)
@@ -130,6 +133,7 @@ DeCuongMonHocMovieLens/
 
 ---
 
+<a id="cai-dat"></a>
 ## 7. 🚀 Hướng Dẫn Cài Đặt & Vận Hành
 
 ### Bước 1: Clone Repository
@@ -166,6 +170,7 @@ streamlit run app.py
 
 ---
 
+<a id="danh-gia"></a>
 ## 8. 📈 Đánh Giá Hiệu Năng Mô Hình
 
 Các thuật toán được kiểm thử trên tập dữ liệu **Test Set (20% split)** với 2 chỉ số đo lường độ sai số dự đoán:
@@ -183,30 +188,13 @@ Các thuật toán được kiểm thử trên tập dữ liệu **Test Set (20%
 
 ---
 
+<a id="dinh-huong"></a>
 ## 9. 🗺️ Định Hướng Phát Triển
 
 - [ ] **Hybrid Recommender System:** Kết hợp trọng số giữa SVD và Content-Based để giải quyết triệt để bài toán Cold Start.
 - [ ] **Deep Learning Integration:** Thử nghiệm mô hình **Neural Collaborative Filtering (NCF)** hoặc **Autoencoders**.
 - [ ] **Real-time Streaming:** Tích hợp Apache Kafka / Redis để gợi ý cập nhật ngay khi người dùng bấm Rating.
 - [ ] **Deploy Cloud:** Triển khai ứng dụng Web lên Streamlit Community Cloud hoặc AWS / Docker.
-
----
-
-## 10. 👥 Thành Viên Thực Hiện
-
-| STT | Họ và Tên | Mã Số Sinh Viên | Vai Trò | Contact / Social |
-| :---: | :--- | :---: | :--- | :--- |
-| 1 | **[Tên Của Bạn]** | [MSSV] | Trưởng nhóm, Thiết kế Model & Backend | [![GitHub](https://img.shields.io/badge/GitHub-100000?style=flat&logo=github&logoColor=white)](https://github.com/nphlanho-star) |
-| 2 | **[Thành Viên 2]** | [MSSV] | Data Preprocessing, EDA & Streamlit UI | [![Email](https://img.shields.io/badge/Email-D14836?style=flat&logo=gmail&logoColor=white)](#) |
-
-- **Giảng viên hướng dẫn:** [Tên Giảng Viên Hướng Dẫn]
-- **Trường / Khoa:** Khoa Công Nghệ Thông Tin - [Tên Trường Đại Học]
-
----
-
-## 11. 📄 Giấy Phép
-
-Dự án này được phân phối dưới giấy phép công khai **MIT License**. Chi tiết xem tại file [LICENSE](LICENSE).
 
 ---
 <p align="center">
