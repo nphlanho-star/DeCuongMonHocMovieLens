@@ -585,7 +585,6 @@ def render_movie_card(col, title, genres_raw, overview_text, poster_url, extra_i
 # THANH ĐIỀU HƯỚNG CHÍNH & PHÂN QUYỀN SIDEBAR
 # ---------------------------------------------------------
 with st.sidebar:
-    st.image("https://assets.nflxext.com/ffe/siteui/common/icons/netflix_logo_2020.svg", width=160)
     st.markdown("### 🔑 CHỌN VAI TRÒ TRUY CẬP")
     user_role = st.selectbox("Vai trò hệ thống:", ["👤 Người Dùng (User)", "⚙️ Quản Trị Viên (Admin)"])
 
