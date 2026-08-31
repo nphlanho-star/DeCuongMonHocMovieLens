@@ -6,6 +6,7 @@ import io
 import json
 import time
 import re
+import html
 from contextlib import redirect_stdout, redirect_stderr
 from concurrent.futures import ThreadPoolExecutor
 
@@ -102,7 +103,20 @@ st.markdown("""
         box-shadow: 0 15px 35px rgba(229,9,20,0.3); 
     }
     .genre-tag { display: inline-block; background-color: #171724; color: #ff3f34; padding: 2px 10px; border-radius: 20px; font-size: 10px; margin-right: 4px; margin-bottom: 4px; border: 1px solid #2b2b3d; font-weight: bold; }
-    .overview-text { font-size: 11px; color: #aaaaaa; height: 48px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; margin-top: 5px; }
+
+    /* Ép kiểu chữ mô tả đồng nhất, không bị lỗi font to */
+    .overview-text, .overview-text p { 
+        font-size: 11px !important; 
+        font-weight: normal !important;
+        color: #aaaaaa !important; 
+        height: 42px !important; 
+        overflow: hidden !important; 
+        display: -webkit-box !important; 
+        -webkit-line-clamp: 3 !important; 
+        -webkit-box-orient: vertical !important; 
+        margin-top: 5px !important; 
+        line-height: 1.3 !important;
+    }
 
     .inspector-card {
         background-color: #12121a;
@@ -165,6 +179,15 @@ TMDB_API_KEY = "8265bd1679663a7ea12ac168da84d2e8"
 FALLBACK_IMAGE = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=500&auto=format&fit=crop"
 
 
+def clean_overview_for_display(text):
+    if not text or not isinstance(text, str):
+        return "No overview available."
+    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r'^[■📖\s]+', '', text).strip()
+    text = re.sub(r'\s+', ' ', text)
+    return text
+
+
 def safe_translate_text(text):
     if not HAS_TRANSLATOR or not text or not text.strip():
         return text, False
@@ -203,11 +226,12 @@ def get_tmdb_movie_details(movie_title, poster_url_from_df=None):
 
     poster_url = poster_url_from_df if (
             poster_url_from_df and isinstance(poster_url_from_df, str) and poster_url_from_df.startswith(
-        "http") and poster_url_from_df != FALLBACK_IMAGE) else FALLBACK_IMAGE
+        "http") and poster_url_from_df != FALLBACK_IMAGE
+    ) else FALLBACK_IMAGE
     fetched_overview = None
 
     try:
-        response = requests.get(url, headers=headers, timeout=0.8)
+        response = requests.get(url, headers=headers, timeout=2.5)
         if response.status_code == 200:
             data = response.json()
             if data and 'results' in data and len(data['results']) > 0:
@@ -230,13 +254,13 @@ def get_movie_trailer_url(movie_title):
     search_url = f"https://api.themoviedb.org/3/search/movie?api_key={TMDB_API_KEY}&query={requests.utils.quote(clean_title)}"
 
     try:
-        res = requests.get(search_url, headers=headers, timeout=0.8)
+        res = requests.get(search_url, headers=headers, timeout=1.5)
         if res.status_code == 200:
             results = res.json().get('results', [])
             if results:
                 movie_id = results[0]['id']
                 videos_url = f"https://api.themoviedb.org/3/movie/{movie_id}/videos?api_key={TMDB_API_KEY}"
-                v_res = requests.get(videos_url, headers=headers, timeout=0.8)
+                v_res = requests.get(videos_url, headers=headers, timeout=1.5)
                 if v_res.status_code == 200:
                     videos = v_res.json().get('results', [])
                     for video in videos:
@@ -285,7 +309,6 @@ def load_resources():
     if os.path.exists(csv_path):
         movies_df = pd.read_csv(csv_path)
     else:
-        # Mock initial dataframe if CSV not present
         data = {
             'movieId': [1, 2, 3],
             'title': ['The Dark Knight', 'Inception', 'Interstellar'],
@@ -345,7 +368,7 @@ def load_resources():
 model, movies_df, tfidf_matrix, tfidf_vectorizer, sbert_model, overview_embeddings, HAS_SBERT = load_resources()
 
 # ---------------------------------------------------------
-# DYNAMIC SESSION STATE & CÁC HÀM CẬP NHẬT LŨY THỪA SIÊU TỐC (CÓ LƯU Ổ ĐĨA & XÓA CACHE RAM)
+# DYNAMIC SESSION STATE & CÁC HÀM CẬP NHẬT LŨY THỪA SIÊU TỐC
 # ---------------------------------------------------------
 if "working_movies_df" not in st.session_state:
     st.session_state.working_movies_df = movies_df.copy()
@@ -356,7 +379,6 @@ if "working_overview_embeddings" not in st.session_state:
 
 
 def refit_tfidf_fast():
-    """TF-IDF tính toán cực nhẹ (mili-giây) nên re-fit lại corpus"""
     df = st.session_state.working_movies_df
     enhanced_corpus = (
             df['genres'].fillna('').str.replace('|', ' ', regex=False) + ' ' +
@@ -367,25 +389,19 @@ def refit_tfidf_fast():
 
 
 def save_to_disk():
-    """Lưu DataFrame và Vector Embeddings xuống đĩa cứng vĩnh viễn & Xóa Cache RAM"""
     csv_path = 'movies_enriched.csv' if os.path.exists('movies_enriched.csv') else 'movies_mapped.csv'
-
-    # Chỉ lưu các cột dữ liệu gốc vào CSV
     save_cols = [c for c in ['movieId', 'title', 'genres', 'overview', 'poster_url'] if
                  c in st.session_state.working_movies_df.columns]
     st.session_state.working_movies_df[save_cols].to_csv(csv_path, index=False)
 
-    # Lưu ma trận vector SBERT để lần sau mở lại không cần encode lại từ đầu
     if HAS_SBERT and st.session_state.working_overview_embeddings is not None:
         np.save('overview_embeddings.npy', st.session_state.working_overview_embeddings)
 
-    # BẮT BUỘC: Xóa Cache RAM để khi F5 ứng dụng sẽ đọc dữ liệu mới nhất từ đĩa cứng
     st.cache_resource.clear()
     st.cache_data.clear()
 
 
 def add_movie_fast(new_row_dict):
-    """Chỉ encode 1 phim mới rồi vstack nối ma trận (~0.05s) và lưu đĩa"""
     new_df = pd.DataFrame([new_row_dict])
     st.session_state.working_movies_df = pd.concat([st.session_state.working_movies_df, new_df], ignore_index=True)
 
@@ -400,7 +416,6 @@ def add_movie_fast(new_row_dict):
 
 
 def edit_movie_fast(idx, title, genres, overview, poster_url):
-    """Ghi đè thông tin & Vector đúng dòng idx mà không tính lại toàn bộ (~0.05s) và lưu đĩa"""
     df = st.session_state.working_movies_df
     df.at[idx, 'title'] = title
     df.at[idx, 'norm_title'] = normalize_title(title)
@@ -422,7 +437,6 @@ def edit_movie_fast(idx, title, genres, overview, poster_url):
 
 
 def delete_movie_fast(idx):
-    """Xóa đúng dòng idx khỏi DataFrame và ma trận Vector (~0.001s) và lưu đĩa"""
     st.session_state.working_movies_df = st.session_state.working_movies_df.drop(idx).reset_index(drop=True)
 
     if HAS_SBERT and sbert_model is not None and st.session_state.working_overview_embeddings is not None:
@@ -500,11 +514,15 @@ def get_dynamic_user_embedding(model, user_id, df, user_history_and_watchlist, a
 
 
 # ---------------------------------------------------------
-# KHUNG RENDER CARD PHIM CHUẨN CINEMATIC
+# KHUNG RENDER CARD PHIM CHUẨN CINEMATIC (ĐÃ SỬA LỖI HTML)
 # ---------------------------------------------------------
 def render_movie_card(col, title, genres_raw, overview_text, poster_url, extra_info_html="", key_prefix="card"):
     cur_uid = st.session_state.current_user_id
     u_data = get_current_user_data(cur_uid)
+
+    clean_ov = clean_overview_for_display(overview_text)
+    attr_ov = html.escape(clean_ov, quote=True)
+    display_ov = html.escape(clean_ov)
 
     with col:
         st.image(poster_url, width="stretch")
@@ -517,7 +535,7 @@ def render_movie_card(col, title, genres_raw, overview_text, poster_url, extra_i
         if extra_info_html:
             st.markdown(extra_info_html, unsafe_allow_html=True)
 
-        st.markdown(f'<div>{badges}</div><div class="overview-text" title="{overview_text}">📖 {overview_text}</div>',
+        st.markdown(f'<div>{badges}</div><div class="overview-text" title="{attr_ov}">📖 {display_ov}</div>',
                     unsafe_allow_html=True)
 
         clean_key = re.sub(r'[^a-zA-Z0-9_]', '_', title)
@@ -672,38 +690,41 @@ if user_role == "👤 Người Dùng (User)":
             else:
                 with st.spinner("🧠 AI đang phân tích ngữ nghĩa cốt truyện..."):
                     start_perf = time.perf_counter()
+
                     search_query_en = plot_query
                     is_vietnamese = bool(
                         re.search(r'[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]',
                                   plot_query.lower()))
 
+                    if is_vietnamese:
+                        translated_txt, success = safe_translate_text(plot_query)
+                        if success:
+                            search_query_en = translated_txt
+
                     if HAS_SBERT and active_overview_embeddings is not None:
-                        query_vec = sbert_model.encode([plot_query], convert_to_numpy=True)
+                        query_vec = sbert_model.encode([search_query_en], convert_to_numpy=True)
                         dense_scores = cosine_similarity(query_vec, active_overview_embeddings).flatten()
                     else:
                         dense_scores = np.zeros(len(active_movies_df))
-                        if is_vietnamese:
-                            translated_txt, success = safe_translate_text(plot_query)
-                            if success: search_query_en = translated_txt
 
                     tfidf_query = tfidf_vectorizer.transform([search_query_en])
                     sparse_scores = cosine_similarity(tfidf_query, active_tfidf_matrix).flatten()
 
                     words = re.findall(r'\b[a-zA-Z0-9]{3,}\b', search_query_en.lower())
                     stopwords = {'this', 'film', 'series', 'set', 'and', 'follows', 'the', 'for', 'with', 'movie',
-                                 'story'}
+                                 'story', 'about'}
                     keywords = [w for w in words if w not in stopwords]
 
                     boost_scores = np.zeros(len(active_movies_df))
                     if keywords:
                         for kw in keywords:
                             title_match = active_movies_df['title_lower'].str.contains(kw, regex=False).values
-                            boost_scores += (title_match.astype(float) * 0.1)
+                            boost_scores += (title_match.astype(float) * 0.15)
                         max_b = np.max(boost_scores)
                         if max_b > 0: boost_scores = boost_scores / max_b
 
                     if HAS_SBERT and active_overview_embeddings is not None:
-                        final_scores = (0.75 * dense_scores) + (0.15 * sparse_scores) + (0.10 * boost_scores)
+                        final_scores = (0.70 * dense_scores) + (0.20 * sparse_scores) + (0.10 * boost_scores)
                     else:
                         final_scores = (0.70 * sparse_scores) + (0.30 * boost_scores)
 
@@ -720,7 +741,7 @@ if user_role == "👤 Người Dùng (User)":
                         if norm_t in seen_in_session: continue
 
                         seen_in_session.add(norm_t)
-                        match_score = min(99.9, max(50.0, final_scores[idx] * 100))
+                        match_score = min(99.9, max(0.0, final_scores[idx] * 100))
                         extra_html = f'<div style="margin-bottom:6px;"><span style="font-size:12px; color:#2ed573; font-weight:bold;">🎯 ĐỘ KHỚP HYBRID: {match_score:.1f}%</span></div>'
 
                         m_info['genres_raw'] = m_info['genres_list']
@@ -929,7 +950,7 @@ if user_role == "👤 Người Dùng (User)":
                               key_prefix="genre")
 
 # ---------------------------------------------------------
-# PHÂN HỆ QUẢN TRỊ VIÊN (ADMIN MODES - OPTIMIZED FAST CRUD WITH PERSISTENCE)
+# PHÂN HỆ QUẢN TRỊ VIÊN (ADMIN MODES)
 # ---------------------------------------------------------
 elif user_role == "⚙️ Quản Trị Viên (Admin)" and st.session_state.admin_authenticated:
 
@@ -945,12 +966,10 @@ elif user_role == "⚙️ Quản Trị Viên (Admin)" and st.session_state.admin
             "🗑️ Xóa Phim"
         ])
 
-        # --- TAB 1: HIỂN THỊ DỮ LIỆU ---
         with tab_list:
             st.subheader(f"Tổng số phim hiện tại: {len(active_movies_df)}")
             st.dataframe(active_movies_df[['movieId', 'title', 'genres', 'overview']], use_container_width=True)
 
-        # --- TAB 2: THÊM PHIM FAST ---
         with tab_add:
             st.subheader("Thêm Phim Mới (Incremental Embeddings)")
             with st.form("add_form_fast", clear_on_submit=True):
@@ -979,7 +998,6 @@ elif user_role == "⚙️ Quản Trị Viên (Admin)" and st.session_state.admin
                     else:
                         st.error("Vui lòng điền đầy đủ Tên phim và Mô tả!")
 
-        # --- TAB 3: SỬA PHIM FAST ---
         with tab_edit:
             st.subheader("Sửa Thông Tin Phim (Ghi đè Vector theo dòng)")
             search_edit = st.text_input("Gõ tên phim cần tìm để sửa:", key="search_edit_fast")
@@ -1008,7 +1026,6 @@ elif user_role == "⚙️ Quản Trị Viên (Admin)" and st.session_state.admin
                 else:
                     st.warning("Không tìm thấy phim phù hợp.")
 
-        # --- TAB 4: XÓA PHIM FAST ---
         with tab_delete:
             st.subheader("Xóa Phim (Nối bớt Ma trận Vector)")
             search_del = st.text_input("Gõ tên phim cần tìm để xóa:", key="search_del_fast")
